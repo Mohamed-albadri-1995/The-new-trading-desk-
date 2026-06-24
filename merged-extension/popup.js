@@ -1105,44 +1105,66 @@ function buildCard(row) {
   if (s.prevClose != null) p.push('<b>Prev close:</b> $' + s.prevClose.toFixed(2));
   if (p.length) L.push('<div class="line">' + p.join(' &nbsp;·&nbsp; ') + '</div>');
   // VWAP
-  if (s.vwap != null && s.vwap > 0) {
-    var v = '<b>VWAP:</b> $' + s.vwap.toFixed(2);
-    if (s.price != null) v += s.price > s.vwap ? ' <span class="pos">▲ above</span>' : s.price < s.vwap ? ' <span class="neg">▼ below</span>' : '';
+  {
+    var v = '<b>VWAP:</b> ';
+    if (s.vwap != null && s.vwap > 0) {
+      v += '$' + s.vwap.toFixed(2);
+      if (s.price != null) v += s.price > s.vwap ? ' <span class="pos">▲ above</span>' : s.price < s.vwap ? ' <span class="neg">▼ below</span>' : '';
+    } else {
+      v += '<span class="sub9">—</span>';
+    }
     L.push('<div class="line">' + v + '</div>');
   }
   // Daily EMAs
-  if (s.ema9 != null && s.ema13 != null && s.ema20 != null && s.ema50 != null) {
-    var stack, above50 = s.price != null && s.price > s.ema50;
-    if (s.ema9 > s.ema13 && s.ema13 > s.ema20 && s.ema20 > s.ema50) stack = '<span class="pos">9&gt;13&gt;20&gt;50 (full bull stack)</span>';
-    else if (s.ema9 < s.ema13 && s.ema13 < s.ema20 && s.ema20 < s.ema50) stack = '<span class="neg">9&lt;13&lt;20&lt;50 (full bear stack)</span>';
-    else if (s.ema9 > s.ema13 && s.ema13 > s.ema20) stack = '<span class="pos">9&gt;13&gt;20</span> <span class="sub9">(above 50: ' + (above50 ? 'yes' : 'no') + ')</span>';
-    else if (s.ema9 < s.ema13 && s.ema13 < s.ema20) stack = '<span class="neg">9&lt;13&lt;20</span> <span class="sub9">(above 50: ' + (above50 ? 'yes' : 'no') + ')</span>';
-    else stack = '<span class="sub9">mixed / consolidating</span>';
-    var prices = '<span class="sub9">9: $' + s.ema9.toFixed(2) + ' · 13: $' + s.ema13.toFixed(2) + ' · 20: $' + s.ema20.toFixed(2) + ' · 50: $' + s.ema50.toFixed(2) + '</span>';
-    L.push('<div class="line"><b>Daily EMAs:</b> ' + stack + '<br>' + prices + '</div>');
+  {
+    var emaLine;
+    if (s.ema9 != null && s.ema13 != null && s.ema20 != null && s.ema50 != null) {
+      var above50 = s.price != null && s.price > s.ema50;
+      var stack;
+      if (s.ema9 > s.ema13 && s.ema13 > s.ema20 && s.ema20 > s.ema50) stack = '<span class="pos">9&gt;13&gt;20&gt;50 (full bull stack)</span>';
+      else if (s.ema9 < s.ema13 && s.ema13 < s.ema20 && s.ema20 < s.ema50) stack = '<span class="neg">9&lt;13&lt;20&lt;50 (full bear stack)</span>';
+      else if (s.ema9 > s.ema13 && s.ema13 > s.ema20) stack = '<span class="pos">9&gt;13&gt;20</span> <span class="sub9">(above 50: ' + (above50 ? 'yes' : 'no') + ')</span>';
+      else if (s.ema9 < s.ema13 && s.ema13 < s.ema20) stack = '<span class="neg">9&lt;13&lt;20</span> <span class="sub9">(above 50: ' + (above50 ? 'yes' : 'no') + ')</span>';
+      else stack = '<span class="sub9">mixed / consolidating</span>';
+      var prices = '<span class="sub9">9: $' + s.ema9.toFixed(2) + ' · 13: $' + s.ema13.toFixed(2) + ' · 20: $' + s.ema20.toFixed(2) + ' · 50: $' + s.ema50.toFixed(2) + '</span>';
+      emaLine = stack + '<br>' + prices;
+    } else {
+      emaLine = '<span class="sub9">—</span>';
+    }
+    L.push('<div class="line"><b>Daily EMAs:</b> ' + emaLine + '</div>');
   }
   // 5-day MA
-  if (s.sma5 != null && s.sma5 > 0 && s.price != null) {
-    var side = s.price > s.sma5 ? ' <span class="pos">▲ price above</span>' : ' <span class="neg">▼ price below</span>';
-    var pct5 = Math.abs(s.price - s.sma5) / s.sma5 * 100;
-    var dist = '';
-    if (s.atr != null && s.atr > 0 && !(s.atr > s.price * 1.5)) {
-      dist = ' <span class="sub9">(' + (Math.abs(s.price - s.sma5) / s.atr).toFixed(1) + ' ATR · ' + pct5.toFixed(1) + '% away)</span>';
-    } else dist = ' <span class="sub9">(' + pct5.toFixed(1) + '% away)</span>';
-    L.push('<div class="line"><b>5-day MA:</b> $' + s.sma5.toFixed(2) + side + dist + '</div>');
+  {
+    var sma5Line;
+    if (s.sma5 != null && s.sma5 > 0 && s.price != null) {
+      var side = s.price > s.sma5 ? ' <span class="pos">▲ price above</span>' : ' <span class="neg">▼ price below</span>';
+      var pct5 = Math.abs(s.price - s.sma5) / s.sma5 * 100;
+      var dist = (s.atr != null && s.atr > 0 && !(s.atr > s.price * 1.5))
+        ? ' <span class="sub9">(' + (Math.abs(s.price - s.sma5) / s.atr).toFixed(1) + ' ATR · ' + pct5.toFixed(1) + '% away)</span>'
+        : ' <span class="sub9">(' + pct5.toFixed(1) + '% away)</span>';
+      sma5Line = '$' + s.sma5.toFixed(2) + side + dist;
+    } else {
+      sma5Line = '<span class="sub9">—</span>';
+    }
+    L.push('<div class="line"><b>5-day MA:</b> ' + sma5Line + '</div>');
   }
   // 1-month range
-  if (s.monthHigh != null || s.monthLow != null) {
-    var m = '<b>1-month range:</b>';
-    if (s.monthHigh != null) {
-      m += ' H $' + s.monthHigh.toFixed(2);
-      if (s.price != null) { var fh = (s.price - s.monthHigh) / s.monthHigh * 100; m += ' <span class="sub9" style="color:' + (fh >= -5 ? 'var(--amber)' : 'var(--muted2)') + '">(' + (fh >= 0 ? '+' : '') + fh.toFixed(1) + '% from H)</span>'; }
+  {
+    var mLine;
+    if (s.monthHigh != null || s.monthLow != null) {
+      mLine = '';
+      if (s.monthHigh != null) {
+        mLine += 'H $' + s.monthHigh.toFixed(2);
+        if (s.price != null) { var fh = (s.price - s.monthHigh) / s.monthHigh * 100; mLine += ' <span class="sub9" style="color:' + (fh >= -5 ? 'var(--amber)' : 'var(--muted2)') + '">(' + (fh >= 0 ? '+' : '') + fh.toFixed(1) + '% from H)</span>'; }
+      }
+      if (s.monthLow != null && s.monthLow > 0) {
+        mLine += (mLine ? ' / ' : '') + 'L $' + s.monthLow.toFixed(2);
+        if (s.price != null) { var fl2 = (s.price - s.monthLow) / s.monthLow * 100; mLine += ' <span class="sub9" style="color:' + (fl2 <= 10 ? 'var(--green-s)' : 'var(--muted2)') + '">(+' + fl2.toFixed(1) + '% from L)</span>'; }
+      }
+    } else {
+      mLine = '<span class="sub9">—</span>';
     }
-    if (s.monthLow != null && s.monthLow > 0) {
-      m += ' / L $' + s.monthLow.toFixed(2);
-      if (s.price != null) { var fl = (s.price - s.monthLow) / s.monthLow * 100; m += ' <span class="sub9" style="color:' + (fl <= 10 ? 'var(--green-s)' : 'var(--muted2)') + '">(+' + fl.toFixed(1) + '% from L)</span>'; }
-    }
-    L.push('<div class="line">' + m + '</div>');
+    L.push('<div class="line"><b>1-month range:</b> ' + mLine + '</div>');
     // 1M position: where price sits within the month range
     if (s.price != null && s.monthHigh != null && s.monthLow != null && s.monthHigh > s.monthLow) {
       var mRange = s.monthHigh - s.monthLow;
@@ -1156,53 +1178,88 @@ function buildCard(row) {
     }
   }
   // Gap
-  if (s.gapPct != null) {
-    var gc = s.gapPct >= 0 ? 'pos' : 'neg', gd = s.gapPct >= 0 ? '▲ gap up' : '▼ gap down';
-    L.push('<div class="line"><b>Gap:</b> <span class="' + gc + '">' + (s.gapPct >= 0 ? '+' : '') + s.gapPct.toFixed(1) + '% ' + gd + '</span></div>');
+  {
+    var gapLine;
+    if (s.gapPct != null) {
+      var gc = s.gapPct >= 0 ? 'pos' : 'neg', gd = s.gapPct >= 0 ? '▲ gap up' : '▼ gap down';
+      gapLine = '<span class="' + gc + '">' + (s.gapPct >= 0 ? '+' : '') + s.gapPct.toFixed(1) + '% ' + gd + '</span>';
+    } else {
+      gapLine = '<span class="sub9">—</span>';
+    }
+    L.push('<div class="line"><b>Gap:</b> ' + gapLine + '</div>');
   }
   // Market cap
-  if (s.mcap != null && s.mcap > 0) {
-    var tier = s.mcap >= 1e10 ? 'large' : s.mcap >= 2e9 ? 'mid' : s.mcap >= 3e8 ? 'small' : 'micro';
-    L.push('<div class="line"><b>Market cap:</b> $' + fmtVolShort(s.mcap) + ' <span class="sub9">(' + tier + ' cap)</span></div>');
+  {
+    var mcapLine;
+    if (s.mcap != null && s.mcap > 0) {
+      var tier = s.mcap >= 1e10 ? 'large' : s.mcap >= 2e9 ? 'mid' : s.mcap >= 3e8 ? 'small' : 'micro';
+      mcapLine = '$' + fmtVolShort(s.mcap) + ' <span class="sub9">(' + tier + ' cap)</span>';
+    } else {
+      mcapLine = '<span class="sub9">—</span>';
+    }
+    L.push('<div class="line"><b>Market cap:</b> ' + mcapLine + '</div>');
   }
   // Float
-  if (s.floatShares != null && s.floatShares > 0) {
-    var ft = s.floatShares < 1e7 ? ' <span class="sub9" style="color:var(--amber)">⚠ low float</span>' : s.floatShares < 5e7 ? ' <span class="sub9" style="color:var(--amber2)">small float</span>' : '';
-    L.push('<div class="line"><b>Float:</b> ' + fmtVolShort(s.floatShares) + ' sh' + ft + '</div>');
+  {
+    var floatLine;
+    if (s.floatShares != null && s.floatShares > 0) {
+      var ft = s.floatShares < 1e7 ? ' <span class="sub9" style="color:var(--amber)">⚠ low float</span>' : s.floatShares < 5e7 ? ' <span class="sub9" style="color:var(--amber2)">small float</span>' : '';
+      floatLine = fmtVolShort(s.floatShares) + ' sh' + ft;
+    } else {
+      floatLine = '<span class="sub9">—</span>';
+    }
+    L.push('<div class="line"><b>Float:</b> ' + floatLine + '</div>');
   }
-  // Short float % (derived) + short ratio (days to cover)
-  if (s.shortFloat != null || s.shortRatio != null) {
+  // Short float % (derived) + short ratio (days to cover) — always shown
+  {
     var sfLine = '<b>Short float:</b> ';
     if (s.shortFloat != null) {
       var sfc = s.shortFloat >= 20 ? 'var(--amber)' : s.shortFloat >= 10 ? 'var(--amber2)' : 'var(--txt2)';
       var sfn = s.shortFloat >= 20 ? ' <span class="sub9" style="color:var(--amber)">⚠ squeeze risk</span>' : '';
       sfLine += '<span style="color:' + sfc + '">' + s.shortFloat.toFixed(1) + '%</span>' + sfn;
     } else {
-      sfLine += '<span class="sub9">n/a</span>';
+      sfLine += '<span class="sub9">—</span>';
     }
+    sfLine += ' &nbsp;·&nbsp; <b>Days to cover:</b> ';
     if (s.shortRatio != null) {
-      sfLine += ' <span class="sub9">· ' + s.shortRatio.toFixed(1) + ' days to cover</span>';
+      sfLine += '<span class="sub9">' + s.shortRatio.toFixed(1) + '</span>';
+    } else {
+      sfLine += '<span class="sub9">—</span>';
     }
     L.push('<div class="line">' + sfLine + '</div>');
   }
   // RVOL
-  if (s.rvol != null && s.rvol > 0) {
-    var rc = s.rvol >= 3 ? 'pos' : s.rvol >= 1.5 ? '' : 'neg';
-    L.push('<div class="line"><b>RVOL:</b> <span class="' + rc + '">' + s.rvol.toFixed(1) + 'x</span></div>');
+  {
+    var rvolLine;
+    if (s.rvol != null && s.rvol > 0) {
+      var rc = s.rvol >= 3 ? 'pos' : s.rvol >= 1.5 ? '' : 'neg';
+      rvolLine = '<span class="' + rc + '">' + s.rvol.toFixed(1) + 'x</span>';
+    } else {
+      rvolLine = '<span class="sub9">—</span>';
+    }
+    L.push('<div class="line"><b>RVOL:</b> ' + rvolLine + '</div>');
   }
   // Pre-market range
-  if (s.pmHigh != null && s.pmLow != null) {
-    var pmR = '<b>PM range:</b> H $' + s.pmHigh.toFixed(2) + ' · L $' + s.pmLow.toFixed(2);
-    L.push('<div class="line">' + pmR + '</div>');
-    // PM/ADR ratio: premarket range relative to average daily range
-    if (s.atr != null && s.atr > 0 && !(s.atr > s.price * 1.5)) {
-      var pmAdr = (s.pmHigh - s.pmLow) / s.atr;
-      if (isFinite(pmAdr)) {
-        var pmAdrCls = pmAdr >= 2 ? 'neg' : pmAdr >= 0.5 ? 'pos' : '';
-        var pmAdrNote = pmAdr >= 2 ? ' (wide — elevated vol)' : pmAdr >= 0.5 ? ' (active PM)' : ' (quiet PM)';
-        L.push('<div class="line"><b>PM/ADR:</b> <span class="' + pmAdrCls + '">' + pmAdr.toFixed(2) + '×</span> <span class="sub9">' + pmAdrNote + '</span></div>');
+  {
+    var pmLine;
+    if (s.pmHigh != null && s.pmLow != null) {
+      pmLine = 'H $' + s.pmHigh.toFixed(2) + ' · L $' + s.pmLow.toFixed(2);
+      if (s.atr != null && s.atr > 0 && !(s.atr > s.price * 1.5)) {
+        var pmAdr = (s.pmHigh - s.pmLow) / s.atr;
+        if (isFinite(pmAdr)) {
+          var pmAdrCls = pmAdr >= 2 ? 'neg' : pmAdr >= 0.5 ? 'pos' : '';
+          var pmAdrNote = pmAdr >= 2 ? ' (wide — elevated vol)' : pmAdr >= 0.5 ? ' (active PM)' : ' (quiet PM)';
+          pmLine += ' &nbsp;·&nbsp; <b>PM/ADR:</b> <span class="' + pmAdrCls + '">' + pmAdr.toFixed(2) + '×</span> <span class="sub9">' + pmAdrNote + '</span>';
+        }
       }
+    } else if (s.pmHigh != null) {
+      pmLine = 'H $' + s.pmHigh.toFixed(2) + ' · L <span class="sub9">—</span>';
+    } else if (s.pmLow != null) {
+      pmLine = 'H <span class="sub9">—</span> · L $' + s.pmLow.toFixed(2);
+    } else {
+      pmLine = '<span class="sub9">—</span>';
     }
+    L.push('<div class="line"><b>PM range:</b> ' + pmLine + '</div>');
   }
 
   var badges = (matchedKeys || [s.screenerKey]).map(function (k) { return '<span class="scr-badge">' + esc(SCREENERS[k].short) + '</span>'; }).join('');
