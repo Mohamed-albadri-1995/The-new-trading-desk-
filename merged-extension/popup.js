@@ -1137,6 +1137,17 @@ function buildCard(row) {
       if (s.price != null) { var fl = (s.price - s.monthLow) / s.monthLow * 100; m += ' <span class="sub9" style="color:' + (fl <= 10 ? 'var(--green-s)' : 'var(--muted2)') + '">(+' + fl.toFixed(1) + '% from L)</span>'; }
     }
     L.push('<div class="line">' + m + '</div>');
+    // 1M position: where price sits within the month range
+    if (s.price != null && s.monthHigh != null && s.monthLow != null && s.monthHigh > s.monthLow) {
+      var mRange = s.monthHigh - s.monthLow;
+      var mPos = (s.price - s.monthLow) / mRange * 100;
+      var mFromH = (s.monthHigh - s.price) / s.monthHigh * 100;
+      var mFromL = (s.price - s.monthLow) / s.monthLow * 100;
+      var mPosCls = mPos >= 70 ? 'pos' : mPos <= 30 ? 'neg' : '';
+      var mp = '<b>1M position:</b> <span class="' + mPosCls + '">' + mPos.toFixed(0) + '% of range</span>';
+      mp += ' <span class="sub9">· ' + mFromH.toFixed(1) + '% below 1M high · ' + mFromL.toFixed(1) + '% above 1M low</span>';
+      L.push('<div class="line">' + mp + '</div>');
+    }
   }
   // Gap
   if (s.gapPct != null) {
@@ -1164,18 +1175,19 @@ function buildCard(row) {
     var rc = s.rvol >= 3 ? 'pos' : s.rvol >= 1.5 ? '' : 'neg';
     L.push('<div class="line"><b>RVOL:</b> <span class="' + rc + '">' + s.rvol.toFixed(1) + 'x</span></div>');
   }
-  // Pre-market range (× ATR)
+  // Pre-market range
   if (s.pmHigh != null && s.pmLow != null) {
     var pmR = '<b>PM range:</b> H $' + s.pmHigh.toFixed(2) + ' · L $' + s.pmLow.toFixed(2);
+    L.push('<div class="line">' + pmR + '</div>');
+    // PM/ADR ratio: premarket range relative to average daily range
     if (s.atr != null && s.atr > 0 && !(s.atr > s.price * 1.5)) {
-      var pmMv = (s.pmHigh - s.pmLow) / s.atr;
-      if (isFinite(pmMv)) {
-        var pmc = pmMv >= 2 ? 'neg' : pmMv >= 0.5 ? 'pos' : '';
-        var pmn = pmMv >= 2 ? ' (wide — vol)' : pmMv >= 0.5 ? ' (active PM)' : ' (quiet PM)';
-        pmR += ' <span class="' + pmc + '">(' + pmMv.toFixed(2) + '× ATR' + pmn + ')</span>';
+      var pmAdr = (s.pmHigh - s.pmLow) / s.atr;
+      if (isFinite(pmAdr)) {
+        var pmAdrCls = pmAdr >= 2 ? 'neg' : pmAdr >= 0.5 ? 'pos' : '';
+        var pmAdrNote = pmAdr >= 2 ? ' (wide — elevated vol)' : pmAdr >= 0.5 ? ' (active PM)' : ' (quiet PM)';
+        L.push('<div class="line"><b>PM/ADR:</b> <span class="' + pmAdrCls + '">' + pmAdr.toFixed(2) + '×</span> <span class="sub9">' + pmAdrNote + '</span></div>');
       }
     }
-    L.push('<div class="line">' + pmR + '</div>');
   }
 
   var badges = (matchedKeys || [s.screenerKey]).map(function (k) { return '<span class="scr-badge">' + esc(SCREENERS[k].short) + '</span>'; }).join('');
@@ -1447,8 +1459,29 @@ var REG_COLUMNS = [
   { label: 'ATR', get: function (r) { return regFix(r.stock.atr); } },
   { label: 'PM High', get: function (r) { return regFix(r.stock.pmHigh); } },
   { label: 'PM Low', get: function (r) { return regFix(r.stock.pmLow); } },
+  { label: 'PM/ADR', get: function (r) {
+    var s = r.stock;
+    if (s.pmHigh == null || s.pmLow == null || !s.atr || s.atr <= 0 || s.atr > (s.price||0) * 1.5) return '';
+    var v = (s.pmHigh - s.pmLow) / s.atr;
+    return isFinite(v) ? v.toFixed(2) : '';
+  } },
   { label: '1M H', get: function (r) { return regFix(r.stock.monthHigh); } },
   { label: '1M L', get: function (r) { return regFix(r.stock.monthLow); } },
+  { label: '1M pos%', get: function (r) {
+    var s = r.stock;
+    if (s.price == null || s.monthHigh == null || s.monthLow == null || s.monthHigh <= s.monthLow) return '';
+    return ((s.price - s.monthLow) / (s.monthHigh - s.monthLow) * 100).toFixed(1);
+  } },
+  { label: '1M fromH%', get: function (r) {
+    var s = r.stock;
+    if (s.price == null || s.monthHigh == null || s.monthHigh <= 0) return '';
+    return ((s.monthHigh - s.price) / s.monthHigh * 100).toFixed(1);
+  } },
+  { label: '1M fromL%', get: function (r) {
+    var s = r.stock;
+    if (s.price == null || s.monthLow == null || s.monthLow <= 0) return '';
+    return ((s.price - s.monthLow) / s.monthLow * 100).toFixed(1);
+  } },
   { label: 'Mkt cap', get: function (r) { return regFix(r.stock.mcap, 0); } },
   { label: 'Float', get: function (r) { return regFix(r.stock.floatShares, 0); } },
   { label: 'Short %', get: function (r) { return regFix(r.stock.shortFloat); } },
