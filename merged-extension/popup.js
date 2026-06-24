@@ -1711,6 +1711,114 @@ async function buildSnapshotRegistry(snapshotTime) {
   setSnapStatus(msg);
 }
 
+// Import historical ticker+date pairs from a CSV (columns: ticker, date YYYY-MM-DD).
+// Fetches Alpaca 1-min bars for each pair and builds snapshot registry entries.
+// Fields that require live scan data (fundamentals, market context) are left null.
+async function importHistoricalIds(csvText, snapTime) {
+  if (!settings.alpacaKey || !settings.alpacaSecret) {
+    setSnapStatus('Add your Alpaca API key and secret in ⚙ Settings first.');
+    return;
+  }
+  var lines = csvText.trim().split('\n');
+  var pairs = [];
+  for (var i = 1; i < lines.length; i++) {  // skip header row
+    var parts = lines[i].trim().split(',');
+    if (parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
+      pairs.push({ ticker: parts[0].trim().toUpperCase(), date: parts[1].trim() });
+    }
+  }
+  if (!pairs.length) { setSnapStatus('No valid rows found in CSV.'); return; }
+
+  var total = pairs.length, built = 0, failed = 0;
+  setSnapStatus('Importing ' + total + ' historical entries…');
+
+  for (var pi = 0; pi < pairs.length; pi++) {
+    var ticker = pairs[pi].ticker, date = pairs[pi].date;
+    var snapId = regId(ticker, date);
+    try {
+      var bars = await new Promise(function (resolve, reject) {
+        chrome.runtime.sendMessage({
+          action: 'alpacaBars', ticker: ticker, date: date,
+          alpacaKey: settings.alpacaKey, alpacaSecret: settings.alpacaSecret
+        }, function (resp) {
+          if (resp && resp.ok) resolve(resp.bars || []);
+          else reject(new Error((resp && resp.error) || 'alpaca failed'));
+        });
+      });
+
+      // Entry bar at snapTime (exact match, else last bar at or before it)
+      var snapBar = null;
+      for (var bi = 0; bi < bars.length; bi++) {
+        if (bars[bi].etTime === snapTime) { snapBar = bars[bi]; break; }
+      }
+      if (!snapBar) {
+        for (var bi2 = bars.length - 1; bi2 >= 0; bi2--) {
+          if (bars[bi2].etTime <= snapTime) { snapBar = bars[bi2]; break; }
+        }
+      }
+      var entry = snapBar ? snapBar.c : null;
+      var openPrice = bars.length ? bars[0].o : null;
+
+      // Cumulative volume + VWAP up to snapTime
+      var volToSnap = 0, vwNumer = 0, vwDenom = 0;
+      for (var bi3 = 0; bi3 < bars.length; bi3++) {
+        var b3 = bars[bi3];
+        if (b3.etTime > snapTime) break;
+        volToSnap += b3.v;
+        vwNumer += (b3.vw || b3.c) * b3.v;
+        vwDenom += b3.v;
+      }
+      var vwapAtSnap = vwDenom > 0 ? vwNumer / vwDenom : null;
+
+      // High/low from snapTime onward (for Part 3 scores)
+      var highSince = null, lowSince = null;
+      for (var bi4 = 0; bi4 < bars.length; bi4++) {
+        var b4 = bars[bi4];
+        if (b4.etTime < snapTime) continue;
+        if (highSince == null || b4.h > highSince) highSince = b4.h;
+        if (lowSince == null || b4.l < lowSince) lowSince = b4.l;
+      }
+
+      snapshotRegistry[snapId] = {
+        date: date, ticker: ticker, tvSymbol: ticker,
+        sector: '', industry: '', themes: '', hotSector: '', sectorBias: '', sectorScore: null,
+        stBias: '', stBull: null, stBear: null, mtBias: '', mtScore: null, ltBias: '',
+        priceAtSnap: entry, open: openPrice,
+        prevClose: null, gapPct: null, changePct: null,
+        volumeAtSnap: volToSnap || null, rvol: null, vwapAtSnap: vwapAtSnap,
+        pmHigh: null, pmLow: null, pmRange: null, pmAdr: null,
+        atr: null,
+        ema9: null, ema13: null, ema20: null, ema50: null, sma5: null,
+        vsEma9: null, vsEma20: null, vsEma50: null, vsSma5: null, emaStack: '',
+        monthHigh: null, monthLow: null, mPos: null, mFromH: null, mFromL: null,
+        mcap: null, floatShares: null, shortFloat: null, shortRatio: null,
+        newsCount: null, screenerKeys: '', firstSeen: '', lastUpdated: '',
+        spyPrice: null, spyDay: null, spyWeek: null,
+        qqqPrice: null, qqqDay: null, qqqWeek: null,
+        iwmPrice: null, iwmDay: null,
+        vixLevel: null, vixChange: null,
+        spyVs200: null, crossSignal: '', stScore: null, mtStageLabel: '',
+        entry: entry, highSinceEntry: highSince, lowSinceEntry: lowSince,
+        entryTime: snapTime,
+        longScore: null, shortScore: null
+      };
+      built++;
+    } catch (e) {
+      console.warn('[HistImport]', ticker, date, e.message);
+      failed++;
+    }
+    if ((built + failed) % 10 === 0 || (built + failed) === total) {
+      setSnapStatus('Importing… ' + (built + failed) + ' / ' + total);
+    }
+  }
+
+  await saveSnapshotRegistry();
+  renderSnapshotTable();
+  var msg = 'Imported ' + built + ' historical entries.';
+  if (failed) msg += ' ' + failed + ' failed — see DevTools console.';
+  setSnapStatus(msg);
+}
+
 function renderSnapshotTable() {
   var host = $('snapTableWrap');
   if (!host) return;
@@ -2104,6 +2212,19 @@ function initRegistry() {
     buildSnapshotRegistry(t);
   });
   var se = $('snapExport'); if (se) se.addEventListener('click', exportSnapshotCsv);
+  var si = $('snapImport'), sif = $('snapImportFile');
+  if (si && sif) {
+    si.addEventListener('click', function () { sif.click(); });
+    sif.addEventListener('change', function () {
+      var file = sif.files && sif.files[0];
+      if (!file) return;
+      sif.value = '';
+      var t = ($('snapTime') && $('snapTime').value) || '09:40';
+      var reader = new FileReader();
+      reader.onload = function (e) { importHistoricalIds(e.target.result, t); };
+      reader.readAsText(file);
+    });
+  }
   var sc = $('snapClear');
   if (sc) sc.addEventListener('click', function () {
     if (!window.confirm('Clear the entire snapshot registry?')) return;
