@@ -11,7 +11,8 @@
     "https://stooq.com/*",
     "https://finnhub.io/*",
     "https://news-headlines.tradingview.com/*",
-    "https://api.polygon.io/*"
+    "https://api.polygon.io/*",
+    "https://finviz.com/*"
   ],
   "background": { "service_worker": "background.js" },
   "action": {

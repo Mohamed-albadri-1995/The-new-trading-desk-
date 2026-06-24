@@ -1003,29 +1003,32 @@ function fetchBySymbols(tvSymbols) {
 // Fetch short interest data from Yahoo Finance for a list of tickers.
 // Returns map: { TICKER: { shortFloat (%), shortRatio (days to cover) } }
 // Requests run in parallel; per-ticker errors are silently ignored.
+// Fetch short float % and days-to-cover from Finviz quote pages.
+// Runs requests in parallel; per-ticker failures are silently skipped.
 function fetchYahooShort(tickers) {
   if (!tickers || !tickers.length) return Promise.resolve({});
   var results = {};
-  // v7/finance/quote: one batch request — credentials:include sends Yahoo session
-  // cookies from the user's browser so the API returns fundamental fields
-  var url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
-            tickers.map(encodeURIComponent).join(',');
-  return fetch(url, { credentials: 'include' })
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (data) {
-      var items = data && data.quoteResponse && data.quoteResponse.result;
-      if (!items) return results;
-      items.forEach(function (item) {
-        // shortPercentOfFloat comes as a ratio (0.04 = 4%)
-        var sf = (item.shortPercentOfFloat != null && item.shortPercentOfFloat > 0)
-          ? item.shortPercentOfFloat * 100 : null;
-        var sr = (item.shortRatio != null && item.shortRatio > 0)
-          ? item.shortRatio : null;
-        if (sf != null || sr != null) results[item.symbol] = { shortFloat: sf, shortRatio: sr };
-      });
-      return results;
-    })
-    .catch(function () { return results; });
+  return Promise.all(tickers.map(function (ticker) {
+    var url = 'https://finviz.com/quote.ashx?t=' + encodeURIComponent(ticker);
+    return fetch(url, { headers: { 'Accept': 'text/html' } })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) {
+        if (!html) return;
+        function stat(label) {
+          var re = new RegExp(label + '<\\/td>\\s*<td[^>]*>([^<]+)');
+          var m = html.match(re);
+          return m ? m[1].trim() : null;
+        }
+        var sfStr = stat('Short Float');
+        var srStr = stat('Short Ratio');
+        var sf = sfStr ? parseFloat(sfStr) : null;   // Finviz shows "32.52%" — parseFloat strips %
+        var sr = srStr ? parseFloat(srStr) : null;
+        if ((sf != null && !isNaN(sf) && sf > 0) || (sr != null && !isNaN(sr) && sr > 0)) {
+          results[ticker] = { shortFloat: sf, shortRatio: sr };
+        }
+      })
+      .catch(function () {});
+  })).then(function () { return results; });
 }
 
 // Apply a Yahoo short-data map to a list of registry rows.
