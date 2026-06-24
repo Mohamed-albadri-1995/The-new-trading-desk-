@@ -665,7 +665,6 @@ var marketCtx = {
 
 // Last-rendered screener stocks, keyed by ticker — lets the shortlist star
 // button look up the full row (tvSymbol, price, etc.) by ticker alone.
-var scrIndex = {};
 // Full shortlists store: { 'YYYY-MM-DD': { items:[…], exports:[…] } }. Loaded once,
 // kept in sync on every mutation. shortlistTodaySet caches today's tickers so
 // buildCard can render the correct star state synchronously.
@@ -1049,8 +1048,10 @@ function computeCardContext(s) {
 
 function buildCard(row) {
   var s = row.stock, matchedKeys = row.screenerKeys;
-  var ctx = row.context || computeCardContext(s);
-  scrIndex[s.ticker] = s;
+  // row.context is always set by registryUpsertLive / registryRefreshStale.
+  // Fall back to {} (neutral) — never to live marketCtx — so the card is a
+  // pure view of what was stored in the registry at scan time.
+  var ctx = row.context || {};
   var L = [];
   // Price · Open · Prev close
   var p = [];
@@ -1531,10 +1532,12 @@ function toggleShortlist(ticker) {
   if (idx >= 0) {
     day.items.splice(idx, 1);
   } else {
-    var s = scrIndex[ticker] || {};
+    // Read from the registry (authoritative source) rather than any in-memory cache.
+    var regRow = registry[regId(ticker, etDateStr())];
+    var rs = (regRow && regRow.stock) || {};
     day.items.push({
-      ticker: ticker, tvSymbol: s.tvSymbol || '', price: s.price != null ? s.price : null,
-      change: s.change != null ? s.change : null, sector: s.sector || '', addedAt: Date.now()
+      ticker: ticker, tvSymbol: rs.tvSymbol || '', price: rs.price != null ? rs.price : null,
+      change: rs.change != null ? rs.change : null, sector: rs.sector || '', addedAt: Date.now()
     });
   }
   refreshShortlistCache();
