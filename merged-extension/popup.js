@@ -1000,6 +1000,46 @@ function fetchBySymbols(tvSymbols) {
   });
 }
 
+// Fetch short interest data from Yahoo Finance for a list of tickers.
+// Returns map: { TICKER: { shortFloat (%), shortRatio (days to cover) } }
+// Requests run in parallel; per-ticker errors are silently ignored.
+function fetchYahooShort(tickers) {
+  if (!tickers || !tickers.length) return Promise.resolve({});
+  var results = {};
+  return Promise.all(tickers.map(function (ticker) {
+    var url = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary/' +
+              encodeURIComponent(ticker) +
+              '?modules=defaultKeyStatistics&formatted=false&corsDomain=finance.yahoo.com';
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        var ks = data &&
+                 data.quoteSummary &&
+                 data.quoteSummary.result &&
+                 data.quoteSummary.result[0] &&
+                 data.quoteSummary.result[0].defaultKeyStatistics;
+        if (!ks) return;
+        // shortPercentOfFloat comes as a ratio (0.04 = 4 %)
+        var sf = (ks.shortPercentOfFloat != null && ks.shortPercentOfFloat > 0)
+          ? ks.shortPercentOfFloat * 100 : null;
+        var sr = (ks.shortRatio != null && ks.shortRatio > 0)
+          ? ks.shortRatio : null;
+        if (sf != null || sr != null) results[ticker] = { shortFloat: sf, shortRatio: sr };
+      })
+      .catch(function () {});
+  })).then(function () { return results; });
+}
+
+// Apply a Yahoo short-data map to a list of registry rows.
+function applyYahooShort(rows, yShort) {
+  rows.forEach(function (row) {
+    var sd = yShort[row.ticker];
+    if (!sd || !row.stock) return;
+    if (sd.shortFloat != null) row.stock.shortFloat = sd.shortFloat;
+    if (sd.shortRatio != null) row.stock.shortRatio = sd.shortRatio;
+  });
+}
+
 // ── per-card news (lazy-loaded to respect Finnhub's 60/min free limit) ──
 function renderNewsItems(resp) {
   var fh = (resp && resp.finnhub) || [], tv = (resp && resp.tradingview) || [];
@@ -1800,9 +1840,12 @@ async function runAllScreeners() {
     Object.keys(byTicker).forEach(function (t) {
       liveStocks.push(byTicker[t].stock); keysByTicker[t] = byTicker[t].keys; liveSet[t] = true;
     });
-    // registry-first: record live now → refresh earlier-today candidates → fetch news → render
+    // registry-first: record live now → refresh earlier-today candidates → enrich short data → fetch news → render
     registryUpsertLive(liveStocks, keysByTicker);
     var refreshed = await registryRefreshStale(liveSet);
+    $('scrStatus').textContent = 'Fetching short data…';
+    var yShort = await fetchYahooShort(regTodayRows().map(function (r) { return r.ticker; }));
+    applyYahooShort(regTodayRows(), yShort);
     await saveRegistry();
     $('scrStatus').textContent = 'Fetching news…';
     await autoFetchNewsForRegistry(regTodayRows());
@@ -1830,6 +1873,8 @@ async function runSingle(key) {
     var keysByTicker = {};
     list.forEach(function (s) { keysByTicker[s.ticker] = [key]; });
     registryUpsertLive(list, keysByTicker);
+    var yShort = await fetchYahooShort(list.map(function (s) { return s.ticker; }));
+    applyYahooShort(regTodayRows().filter(function (r) { return yShort[r.ticker]; }), yShort);
     await saveRegistry();
     $('scrStatus').textContent = 'Fetching news…';
     await autoFetchNewsForRegistry(regTodayRows());
