@@ -451,6 +451,20 @@
     <div class="status" id="regSummary"></div>
     <div class="status" id="regStatus"></div>
     <div class="reg-table-wrap" id="regTableWrap"></div>
+
+    <!-- ── SNAPSHOT REGISTRY ── -->
+    <div class="h1" style="margin-top:22px;font-size:14px">📊 Snapshot Registry</div>
+    <div class="set-help">70-column daily snapshot built from Alpaca 1-min bars. <b>Part 1 (1–50):</b> instrument + market context + full card technicals. <b>Part 2 (51–64):</b> market underlyings duplicated per ticker for data analysis. <b>Part 3 (65–70):</b> Entry (field 65 = price at chosen time), High/Low since entry, scores — Long score = (High − Entry) / ATR · Short score = (Entry − Low) / ATR. Changing the entry time rebuilds the entire Part 1 snapshot at that time.</div>
+    <div class="reg-toolbar" id="snapToolbar">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt2)">Entry / snapshot time ET:
+        <input id="snapTime" type="time" value="09:40" style="background:#0f172a;border:1px solid var(--border2);border-radius:4px;color:#93c5fd;font-size:11px;padding:3px 8px">
+      </label>
+      <button class="btn btn-primary" id="snapBuild">🔨 Build Registry</button>
+      <button class="btn btn-ghost" id="snapExport">⬇ Export CSV</button>
+      <button class="btn btn-ghost" id="snapClear">🗑 Clear</button>
+    </div>
+    <div class="status" id="snapStatus"></div>
+    <div class="reg-table-wrap" id="snapTableWrap"></div>
   </div>
 
   <!-- ════════════════════ SHORTLIST ════════════════════ -->
@@ -650,6 +664,13 @@
       <div class="set-help">Used to pull company-news <b>summaries</b> onto screener cards. Grab a free key at finnhub.io (60 calls/min on the free tier). TradingView headlines are fetched without a key on a best-effort basis (unofficial endpoint, titles + links only). News loads per-card on demand to stay within the rate limit.</div>
       <div class="set-toggle"><label><input id="setFinnhubNews" type="checkbox"> Include Finnhub news on cards (in addition to TradingView)</label></div>
       <div class="set-field"><label>Finnhub API key</label><input id="setFinnhub" type="password" placeholder="paste key…" autocomplete="off" spellcheck="false"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-hdr">📊 Alpaca Markets — Snapshot Registry</div>
+      <div class="set-help">Required for the <b>Snapshot Registry</b>. Fetches 1-minute bars at your chosen entry time (default 9:40 ET) to populate Part 3 output scores (Long/Short). Get free keys at alpaca.markets — a paper-trading account works.</div>
+      <div class="set-field"><label>Alpaca API Key ID</label><input id="setAlpacaKey" type="password" placeholder="PKXXXX…" autocomplete="off" spellcheck="false"></div>
+      <div class="set-field"><label>Alpaca API Secret</label><input id="setAlpacaSecret" type="password" placeholder="paste secret…" autocomplete="off" spellcheck="false"></div>
     </div>
 
     <div class="row">

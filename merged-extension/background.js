@@ -270,6 +270,60 @@ async function bg_fetchCandles(ticker, fromMs, toMs, resolution, polygonKey, fin
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// SNAPSHOT REGISTRY — Alpaca Markets 1-minute bars
+// ══════════════════════════════════════════════════════════════════════
+function etOffsetStr(dateStr) {
+  // US DST: starts 2nd Sunday of March, ends 1st Sunday of November
+  var p = dateStr.split('-'), yr = +p[0], mo = +p[1], dy = +p[2];
+  var mar1 = new Date(yr, 2, 1);
+  var dstStart = new Date(yr, 2, 8 + (7 - mar1.getDay()) % 7); // 2nd Sunday Mar
+  var nov1 = new Date(yr, 10, 1);
+  var dstEnd = new Date(yr, 10, 1 + (7 - nov1.getDay()) % 7);  // 1st Sunday Nov
+  var d = new Date(yr, mo - 1, dy);
+  return (d >= dstStart && d < dstEnd) ? '-04:00' : '-05:00';
+}
+
+async function fetchAlpacaBars(ticker, dateStr, alpacaKey, alpacaSecret) {
+  var tz = etOffsetStr(dateStr);
+  var tzH = tz === '-04:00' ? -4 : -5;
+  var start = dateStr + 'T09:20:00' + tz;
+  var end   = dateStr + 'T20:10:00' + tz;
+  var baseUrl = 'https://data.alpaca.markets/v2/stocks/' +
+    encodeURIComponent(ticker.toUpperCase()) + '/bars' +
+    '?timeframe=1Min&start=' + encodeURIComponent(start) +
+    '&end=' + encodeURIComponent(end) + '&limit=1000&adjustment=raw';
+  var headers = {
+    'APCA-API-KEY-ID': alpacaKey,
+    'APCA-API-SECRET-KEY': alpacaSecret,
+    'Accept': 'application/json'
+  };
+  var feeds = ['sip', 'iex'];
+  var lastErr = '';
+  for (var fi = 0; fi < feeds.length; fi++) {
+    var url = baseUrl + '&feed=' + feeds[fi];
+    try {
+      var resp = await fetch(url, { headers: headers });
+      if (!resp.ok) {
+        var txt = ''; try { var ej = await resp.json(); txt = ej.message || ej.error || ''; } catch (e) {}
+        lastErr = 'HTTP ' + resp.status + (txt ? ': ' + txt : '');
+        if (resp.status === 403 || resp.status === 422) continue; // try next feed
+        throw new Error(lastErr);
+      }
+      var data = await resp.json();
+      return (data.bars || []).map(function (b) {
+        var d = new Date(b.t);
+        var etMs = d.getTime() + tzH * 3600000;
+        var ed = new Date(etMs);
+        var hh = String(ed.getUTCHours()).padStart(2, '0');
+        var mm = String(ed.getUTCMinutes()).padStart(2, '0');
+        return { t: b.t, etTime: hh + ':' + mm, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0, vw: b.vw != null ? b.vw : b.c };
+      });
+    } catch (e) { lastErr = e.message; }
+  }
+  throw new Error('Alpaca bars failed for ' + ticker + ': ' + lastErr);
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // MESSAGE ROUTER — handles all actions from popup.js
 // ══════════════════════════════════════════════════════════════════════
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
@@ -312,6 +366,14 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   if (msg.action === 'fetchCandles') {
     bg_fetchCandles(msg.ticker, msg.fromMs, msg.toMs, msg.resolution, msg.polygonKey, msg.finnhubKey, msg.range)
       .then(function (result) { sendResponse({ ok: true, candles: result }); })
+      .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
+    return true;
+  }
+
+  // Snapshot Registry: Alpaca 1-min bars
+  if (msg.action === 'alpacaBars') {
+    fetchAlpacaBars(msg.ticker, msg.date, msg.alpacaKey, msg.alpacaSecret)
+      .then(function (bars) { sendResponse({ ok: true, bars: bars }); })
       .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
     return true;
   }

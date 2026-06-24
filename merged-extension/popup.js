@@ -53,7 +53,9 @@ var DEFAULT_SETTINGS = {
   hotFloor: 40,         // once HOT, stays HOT while score ≥ this floor
   hotCoolDays: 2,       // drop HOT only after score is below the floor for MORE than this many sessions
   finnhubKey: '',
-  finnhubNews: true     // include Finnhub news on cards (alongside TradingView); off = TradingView only
+  finnhubNews: true,    // include Finnhub news on cards (alongside TradingView); off = TradingView only
+  alpacaKey: '',
+  alpacaSecret: ''
 };
 var settings = Object.assign({}, DEFAULT_SETTINGS);
 
@@ -1292,6 +1294,336 @@ function loadRegistry() {
 }
 function saveRegistry() { return storageSet({ registry: registry }); }
 function regId(ticker, date) { return ticker + '|' + date; }
+
+// ══════════════════════════════════════════════════════════════════════
+// SNAPSHOT REGISTRY — 70-column daily snapshot, Alpaca 1-min data source
+// Key = TICKER|YYYY-MM-DD (same format as live registry)
+// ══════════════════════════════════════════════════════════════════════
+var snapshotRegistry = {};
+function loadSnapshotRegistry() {
+  return storageGet(['snapshotRegistry']).then(function (r) {
+    snapshotRegistry = r.snapshotRegistry || {};
+    return snapshotRegistry;
+  });
+}
+function saveSnapshotRegistry() { return storageSet({ snapshotRegistry: snapshotRegistry }); }
+function setSnapStatus(msg) { var el = $('snapStatus'); if (el) el.textContent = msg || ''; }
+
+function snapFix(v, d) { return (v == null || !isFinite(+v)) ? '' : Number(v).toFixed(d == null ? 2 : d); }
+
+// 70-column definition — field numbers are 1-indexed (array index + 1)
+// Part 1 (1-50): identification + market context + technicals
+// Part 2 (51-64): market underlyings, one value per day, duplicated per row for analysis
+// Part 3 (65-70): output calculations — entry (65) + high/low since entry (66/67) + scores (69/70)
+var SNAP_COLUMNS = [
+  // ── Part 1: Identification ──────────────────────────────────
+  { n: 1,  label: 'Date',           k: 'date' },
+  { n: 2,  label: 'Ticker',         k: 'ticker' },
+  { n: 3,  label: 'TV Symbol',      k: 'tvSymbol' },
+  { n: 4,  label: 'Sector',         k: 'sector' },
+  { n: 5,  label: 'Industry',       k: 'industry' },
+  { n: 6,  label: 'Themes',         k: 'themes' },
+  { n: 7,  label: 'Hot Sector',     k: 'hotSector' },
+  { n: 8,  label: 'Sector Bias',    k: 'sectorBias' },
+  { n: 9,  label: 'Sector Score',   k: 'sectorScore', fmt: 0 },
+  // ── Market context at build time ────────────────────────────
+  { n: 10, label: 'ST Bias',        k: 'stBias' },
+  { n: 11, label: 'ST Bull',        k: 'stBull', fmt: 0 },
+  { n: 12, label: 'ST Bear',        k: 'stBear', fmt: 0 },
+  { n: 13, label: 'MT Bias',        k: 'mtBias' },
+  { n: 14, label: 'MT Score',       k: 'mtScore', fmt: 0 },
+  { n: 15, label: 'LT Bias',        k: 'ltBias' },
+  // ── Price action at snapshot time (Alpaca) ──────────────────
+  { n: 16, label: 'Price',          k: 'priceAtSnap', fmt: 2 },
+  { n: 17, label: 'Daily Open',     k: 'open', fmt: 2 },
+  { n: 18, label: 'Prev Close',     k: 'prevClose', fmt: 2 },
+  { n: 19, label: 'Gap %',          k: 'gapPct', fmt: 2 },
+  { n: 20, label: 'Change %',       k: 'changePct', fmt: 2 },
+  { n: 21, label: 'Volume',         k: 'volumeAtSnap', fmt: 0 },
+  { n: 22, label: 'RVOL',           k: 'rvol', fmt: 2 },
+  { n: 23, label: 'VWAP',           k: 'vwapAtSnap', fmt: 2 },
+  // ── Pre-market ──────────────────────────────────────────────
+  { n: 24, label: 'PM High',        k: 'pmHigh', fmt: 2 },
+  { n: 25, label: 'PM Low',         k: 'pmLow', fmt: 2 },
+  { n: 26, label: 'PM Range',       k: 'pmRange', fmt: 2 },
+  { n: 27, label: 'PM/ADR',         k: 'pmAdr', fmt: 2 },
+  // ── Volatility & indicators ─────────────────────────────────
+  { n: 28, label: 'ATR-14',         k: 'atr', fmt: 2 },
+  { n: 29, label: 'EMA9',           k: 'ema9', fmt: 2 },
+  { n: 30, label: 'EMA13',          k: 'ema13', fmt: 2 },
+  { n: 31, label: 'EMA20',          k: 'ema20', fmt: 2 },
+  { n: 32, label: 'EMA50',          k: 'ema50', fmt: 2 },
+  { n: 33, label: 'SMA5',           k: 'sma5', fmt: 2 },
+  { n: 34, label: 'vs EMA9 %',      k: 'vsEma9', fmt: 2 },
+  { n: 35, label: 'vs EMA20 %',     k: 'vsEma20', fmt: 2 },
+  { n: 36, label: 'vs EMA50 %',     k: 'vsEma50', fmt: 2 },
+  { n: 37, label: 'vs SMA5 %',      k: 'vsSma5', fmt: 2 },
+  { n: 38, label: 'EMA Stack',      k: 'emaStack' },
+  // ── Monthly range ────────────────────────────────────────────
+  { n: 39, label: '1M High',        k: 'monthHigh', fmt: 2 },
+  { n: 40, label: '1M Low',         k: 'monthLow', fmt: 2 },
+  { n: 41, label: '1M pos %',       k: 'mPos', fmt: 1 },
+  { n: 42, label: '1M from H %',    k: 'mFromH', fmt: 1 },
+  { n: 43, label: '1M from L %',    k: 'mFromL', fmt: 1 },
+  // ── Fundamentals ─────────────────────────────────────────────
+  { n: 44, label: 'Mkt Cap',        k: 'mcap', fmt: 0 },
+  { n: 45, label: 'Float',          k: 'floatShares', fmt: 0 },
+  { n: 46, label: 'Short Float %',  k: 'shortFloat', fmt: 1 },
+  // ── Registry meta ────────────────────────────────────────────
+  { n: 47, label: 'News count',     k: 'newsCount', fmt: 0 },
+  { n: 48, label: 'Screeners',      k: 'screenerKeys' },
+  { n: 49, label: 'First seen ET',  k: 'firstSeen' },
+  { n: 50, label: 'Last upd ET',    k: 'lastUpdated' },
+  // ── Part 2: Market Underlyings (per-day, duplicated per ticker) ──
+  { n: 51, label: 'SPY Price',      k: 'spyPrice', fmt: 2 },
+  { n: 52, label: 'SPY Day %',      k: 'spyDay', fmt: 2 },
+  { n: 53, label: 'SPY Week %',     k: 'spyWeek', fmt: 2 },
+  { n: 54, label: 'QQQ Price',      k: 'qqqPrice', fmt: 2 },
+  { n: 55, label: 'QQQ Day %',      k: 'qqqDay', fmt: 2 },
+  { n: 56, label: 'QQQ Week %',     k: 'qqqWeek', fmt: 2 },
+  { n: 57, label: 'IWM Price',      k: 'iwmPrice', fmt: 2 },
+  { n: 58, label: 'IWM Day %',      k: 'iwmDay', fmt: 2 },
+  { n: 59, label: 'VIX Level',      k: 'vixLevel', fmt: 2 },
+  { n: 60, label: 'VIX Change %',   k: 'vixChange', fmt: 2 },
+  { n: 61, label: 'SPY vs 200DMA%', k: 'spyVs200', fmt: 2 },
+  { n: 62, label: 'Cross Signal',   k: 'crossSignal' },
+  { n: 63, label: 'ST Score',       k: 'stScore', fmt: 0 },
+  { n: 64, label: 'MT Stage Label', k: 'mtStageLabel' },
+  // ── Part 3: Output Calculations ──────────────────────────────
+  // Field 65 = Entry (price at snapshot time, same as field 16)
+  // Fields 69/70 formulas use field 65 as entry and field 28 (ATR) as divisor
+  { n: 65, label: 'Entry',          k: 'entry', fmt: 2 },
+  { n: 66, label: 'High since entry',k: 'highSinceEntry', fmt: 2 },
+  { n: 67, label: 'Low since entry', k: 'lowSinceEntry', fmt: 2 },
+  { n: 68, label: 'Entry Time ET',  k: 'entryTime' },
+  { n: 69, label: 'Long score',     k: 'longScore', fmt: 2 },
+  { n: 70, label: 'Short score',    k: 'shortScore', fmt: 2 }
+];
+
+function snapGetVal(row, col) {
+  var v = row[col.k];
+  if (v == null) return '';
+  if (col.fmt != null) return snapFix(v, col.fmt);
+  return String(v);
+}
+
+async function buildSnapshotRegistry(snapshotTime) {
+  if (!settings.alpacaKey || !settings.alpacaSecret) {
+    setSnapStatus('Add your Alpaca API key and secret in ⚙ Settings first.');
+    return;
+  }
+  var today = etDateStr();
+  var todayRows = regTodayRows();
+  if (!todayRows.length) {
+    setSnapStatus('No tickers in registry for today — run a scan first.');
+    return;
+  }
+
+  // Safety: warn if building before market close (Part 3 outputs will be partial)
+  var nowET = fmtETTime(Date.now()); // HH:MM
+  var beforeClose = nowET < '16:00';
+
+  // Compute market context signals from live marketCtx
+  var ix = marketCtx.indices || {};
+  var spyIx = ix.SPY || {}, qqqIx = ix.QQQ || {}, iwmIx = ix.IWM || {}, vixIx = ix.VIX || {};
+  var stBull = 0, stBear = 0;
+  function countIdx(d, up, dn) { if (!d || d.change == null) return; if (d.change > up) stBull++; else if (d.change < dn) stBear++; }
+  function countVix(d) { if (!d || d.change == null) return; if (d.change < -2) stBull++; else if (d.change > 1) stBear++; }
+  function countWeek(d, up, dn) { if (!d || d.weekChg == null) return; if (d.weekChg > up) stBull++; else if (d.weekChg < dn) stBear++; }
+  countIdx(spyIx, 0.3, -0.3); countIdx(qqqIx, 0.3, -0.3); countIdx(iwmIx, 0.3, -0.3);
+  countVix(vixIx); countWeek(spyIx, 1, -1); countWeek(qqqIx, 1, -1);
+  var stScore = stBull - stBear;
+
+  var midData = marketCtx.stageData;
+  var ltData  = marketCtx.ltData;
+  var spyClose = spyIx.close; // Close field from index data
+
+  var total = todayRows.length, built = 0, failed = 0;
+  setSnapStatus('Building snapshot for ' + total + ' ticker' + (total === 1 ? '' : 's') + ' at ' + snapshotTime + ' ET…');
+
+  for (var i = 0; i < todayRows.length; i++) {
+    var regRow = todayRows[i];
+    var ticker = regRow.ticker;
+    var s = regRow.stock || {};
+    var ctx = regRow.context || {};
+
+    try {
+      // Fetch Alpaca 1-min bars for today
+      var bars = await new Promise(function (resolve, reject) {
+        chrome.runtime.sendMessage({ action: 'alpacaBars', ticker: ticker, date: today,
+          alpacaKey: settings.alpacaKey, alpacaSecret: settings.alpacaSecret },
+          function (resp) { if (resp && resp.ok) resolve(resp.bars || []); else reject(new Error((resp && resp.error) || 'alpaca failed')); });
+      });
+
+      // Find the bar that starts at snapshotTime (e.g. '09:40')
+      var snapBar = null;
+      for (var bi = 0; bi < bars.length; bi++) {
+        if (bars[bi].etTime === snapshotTime) { snapBar = bars[bi]; break; }
+      }
+      // If exact match not found, use the last bar at or before snapshotTime
+      if (!snapBar) {
+        for (var bi2 = bars.length - 1; bi2 >= 0; bi2--) {
+          if (bars[bi2].etTime <= snapshotTime) { snapBar = bars[bi2]; break; }
+        }
+      }
+
+      var entry = snapBar ? snapBar.c : null;
+
+      // Cumulative volume and VWAP from session open to snapshot time
+      var volToSnap = 0, vwNumer = 0, vwDenom = 0;
+      for (var bi3 = 0; bi3 < bars.length; bi3++) {
+        var b = bars[bi3];
+        if (b.etTime > snapshotTime) break;
+        volToSnap += b.v;
+        vwNumer += (b.vw || b.c) * b.v;
+        vwDenom += b.v;
+      }
+      var vwapAtSnap = vwDenom > 0 ? vwNumer / vwDenom : null;
+
+      // High/low from snapshot time bar onward (inclusive) to end of session
+      var highSince = null, lowSince = null;
+      for (var bi4 = 0; bi4 < bars.length; bi4++) {
+        var b4 = bars[bi4];
+        if (b4.etTime < snapshotTime) continue;
+        if (highSince == null || b4.h > highSince) highSince = b4.h;
+        if (lowSince == null || b4.l < lowSince) lowSince = b4.l;
+      }
+
+      // Derived values
+      var atr = s.atr;
+      var prevCl = s.prevClose;
+      var changePct = (entry != null && prevCl != null && prevCl > 0) ? (entry - prevCl) / prevCl * 100 : null;
+      var pmRange = (s.pmHigh != null && s.pmLow != null) ? s.pmHigh - s.pmLow : null;
+      var pmAdr = (pmRange != null && atr && atr > 0 && !(atr > (s.price || 0) * 1.5)) ? pmRange / atr : null;
+      function pct(a, b) { return (a != null && b != null && b > 0) ? (a - b) / b * 100 : null; }
+      var ema9 = s.ema9, ema13 = s.ema13, ema20 = s.ema20, ema50 = s.ema50, sma5 = s.sma5;
+      var emaStack = '';
+      if (entry != null && ema9 != null && ema13 != null && ema20 != null && ema50 != null) {
+        if (ema9 > ema13 && ema13 > ema20 && ema20 > ema50) emaStack = 'bull (9>13>20>50)';
+        else if (ema9 < ema13 && ema13 < ema20 && ema20 < ema50) emaStack = 'bear (9<13<20<50)';
+        else emaStack = 'mixed';
+      }
+      var mh = s.monthHigh, ml = s.monthLow;
+      var mPos = (entry != null && mh != null && ml != null && mh > ml) ? (entry - ml) / (mh - ml) * 100 : null;
+      var mFromH = (entry != null && mh != null && mh > 0) ? (mh - entry) / mh * 100 : null;
+      var mFromL = (entry != null && ml != null && ml > 0) ? (entry - ml) / ml * 100 : null;
+      var longScore  = (entry != null && highSince != null && atr && atr > 0) ? (highSince - entry) / atr : null;
+      var shortScore = (entry != null && lowSince != null && atr && atr > 0) ? (entry - lowSince) / atr : null;
+
+      var newsCount = 0;
+      if (regRow.news) newsCount = (regRow.news.finnhub || []).length + (regRow.news.tradingview || []).length;
+
+      var snapId = regId(ticker, today);
+      snapshotRegistry[snapId] = {
+        // Part 1 — identification
+        date: today, ticker: ticker,
+        tvSymbol: s.tvSymbol || regRow.tvSymbol || ticker,
+        sector: ctx.broad || s.sector || '',
+        industry: s.industry || '',
+        themes: (ctx.themes || []).join(', '),
+        hotSector: ctx.secHot ? 'Y' : 'N',
+        sectorBias: ctx.secBias || '',
+        sectorScore: ctx.secScore,
+        // market context
+        stBias: ctx.marketBias || marketCtx.marketBias || 'NEUTRAL',
+        stBull: stBull, stBear: stBear,
+        mtBias: marketCtx.marketStage || 'UNKNOWN',
+        mtScore: midData ? midData.bull : null,
+        ltBias: marketCtx.marketLongTerm || 'UNKNOWN',
+        // price action at snapshot time (from Alpaca)
+        priceAtSnap: entry,
+        open: s.open,
+        prevClose: prevCl,
+        gapPct: s.gapPct,
+        changePct: changePct,
+        volumeAtSnap: volToSnap || null,
+        rvol: s.rvol,
+        vwapAtSnap: vwapAtSnap,
+        // pre-market
+        pmHigh: s.pmHigh, pmLow: s.pmLow, pmRange: pmRange, pmAdr: pmAdr,
+        // technicals
+        atr: atr,
+        ema9: ema9, ema13: ema13, ema20: ema20, ema50: ema50, sma5: sma5,
+        vsEma9: pct(entry, ema9), vsEma20: pct(entry, ema20),
+        vsEma50: pct(entry, ema50), vsSma5: pct(entry, sma5),
+        emaStack: emaStack,
+        // monthly range
+        monthHigh: mh, monthLow: ml, mPos: mPos, mFromH: mFromH, mFromL: mFromL,
+        // fundamentals
+        mcap: s.mcap, floatShares: s.floatShares, shortFloat: s.shortFloat,
+        // meta
+        newsCount: newsCount,
+        screenerKeys: (regRow.screenerKeys || []).map(function (k) { return SCREENERS[k] ? SCREENERS[k].short : k; }).join(', '),
+        firstSeen: fmtETTime(regRow.firstSeen),
+        lastUpdated: fmtETTime(regRow.lastUpdated),
+        // Part 2 — market underlyings
+        spyPrice: spyIx.close, spyDay: spyIx.change, spyWeek: spyIx.weekChg,
+        qqqPrice: qqqIx.close, qqqDay: qqqIx.change, qqqWeek: qqqIx.weekChg,
+        iwmPrice: iwmIx.close, iwmDay: iwmIx.change,
+        vixLevel: vixIx.close, vixChange: vixIx.change,
+        spyVs200: ltData ? ltData.dist : null,
+        crossSignal: ltData ? (ltData.bias === 'BULLISH' ? 'golden' : ltData.bias === 'BEARISH' ? 'death' : ltData.bias || '') : '',
+        stScore: stScore,
+        mtStageLabel: midData ? (midData.stageLabel || midData.stage || '') : '',
+        // Part 3 — outputs (entry = field 65, both score formulas use it)
+        entry: entry,                  // field 65 = price at snapshot time (= field 16)
+        highSinceEntry: highSince,     // field 66
+        lowSinceEntry: lowSince,       // field 67
+        entryTime: snapshotTime,       // field 68
+        longScore: longScore,          // field 69 = (highSinceEntry − entry) / ATR
+        shortScore: shortScore         // field 70 = (entry − lowSinceEntry) / ATR
+      };
+      built++;
+    } catch (e) {
+      console.warn('[SnapReg] Failed for', ticker, e.message);
+      failed++;
+    }
+    setSnapStatus('Building… ' + (built + failed) + ' / ' + total);
+  }
+
+  await saveSnapshotRegistry();
+  renderSnapshotTable();
+  var msg = 'Snapshot built: ' + built + ' ticker' + (built === 1 ? '' : 's') + ' at ' + snapshotTime + ' ET.';
+  if (failed) msg += ' ' + failed + ' failed (open DevTools console for details).';
+  if (beforeClose) msg += ' ⚠ Market not closed yet — fields 66/67/69/70 show intraday range so far, not full day.';
+  setSnapStatus(msg);
+}
+
+function renderSnapshotTable() {
+  var host = $('snapTableWrap');
+  if (!host) return;
+  var all = Object.values(snapshotRegistry);
+  if (!all.length) { host.innerHTML = '<div class="empty">No snapshot data yet. Click 🔨 Build Registry after running a scan.</div>'; return; }
+  // Sort by date desc, then ticker
+  all.sort(function (a, b) {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
+  });
+  var head = '<tr>' + SNAP_COLUMNS.map(function (c) {
+    return '<th title="Field ' + c.n + '">' + esc(c.label) + '</th>';
+  }).join('') + '</tr>';
+  var body = all.map(function (row) {
+    return '<tr>' + SNAP_COLUMNS.map(function (c) {
+      return '<td>' + esc(snapGetVal(row, c)) + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  host.innerHTML = '<table class="reg-table"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+}
+
+function exportSnapshotCsv() {
+  var all = Object.values(snapshotRegistry);
+  if (!all.length) { setSnapStatus('Nothing to export.'); return; }
+  all.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : a.ticker < b.ticker ? -1 : 1; });
+  var lines = [SNAP_COLUMNS.map(function (c) { return csvCell(c.label); }).join(',')];
+  all.forEach(function (row) { lines.push(SNAP_COLUMNS.map(function (c) { return csvCell(snapGetVal(row, c)); }).join(',')); });
+  var csv = lines.join('\r\n');
+  var blob = new Blob([csv], { type: 'text/csv' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'snapshot-registry-' + etDateStr() + '.csv';
+  document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 500);
+  setSnapStatus('Exported ' + all.length + ' snapshot row' + (all.length === 1 ? '' : 's') + '.');
+}
 function regTodayRows() {
   var today = etDateStr();
   return Object.keys(registry).map(function (k) { return registry[k]; })
@@ -1636,6 +1968,19 @@ function initRegistry() {
       renderScreenerFromRegistry();
       setRegStatus('Registry cleared.');
     });
+  });
+  // Snapshot registry controls
+  var sb = $('snapBuild');
+  if (sb) sb.addEventListener('click', function () {
+    var t = ($('snapTime') && $('snapTime').value) || '09:40';
+    buildSnapshotRegistry(t);
+  });
+  var se = $('snapExport'); if (se) se.addEventListener('click', exportSnapshotCsv);
+  var sc = $('snapClear');
+  if (sc) sc.addEventListener('click', function () {
+    if (!window.confirm('Clear the entire snapshot registry?')) return;
+    snapshotRegistry = {};
+    saveSnapshotRegistry().then(function () { renderSnapshotTable(); setSnapStatus('Snapshot registry cleared.'); });
   });
 }
 
@@ -2018,6 +2363,8 @@ function fillSettingsForm() {
   $('setHotCool').value = settings.hotCoolDays;
   $('setFinnhub').value = settings.finnhubKey || '';
   $('setFinnhubNews').checked = settings.finnhubNews !== false;
+  $('setAlpacaKey').value = settings.alpacaKey || '';
+  $('setAlpacaSecret').value = settings.alpacaSecret || '';
 }
 function setSettingsStatus(msg) {
   $('setStatus').textContent = msg;
@@ -2040,6 +2387,8 @@ function initSettings() {
     settings.hotCoolDays = clampInt($('setHotCool').value, 1, 14, DEFAULT_SETTINGS.hotCoolDays);
     settings.finnhubKey = ($('setFinnhub').value || '').trim();
     settings.finnhubNews = !!$('setFinnhubNews').checked;
+    settings.alpacaKey = ($('setAlpacaKey').value || '').trim();
+    settings.alpacaSecret = ($('setAlpacaSecret').value || '').trim();
     // keep thresholds ordered: floor ≤ sustained ≤ immediate
     if (settings.hotSustained > settings.hotImmediate) settings.hotSustained = settings.hotImmediate;
     if (settings.hotFloor > settings.hotSustained) settings.hotFloor = settings.hotSustained;
@@ -2081,10 +2430,11 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   // restore the registry + shortlists, then paint today's candidate cards
   // (after shortlists so the ☆/★ state is correct) and the registry table.
-  Promise.all([loadRegistry(), loadShortlists()]).then(function () {
+  Promise.all([loadRegistry(), loadShortlists(), loadSnapshotRegistry()]).then(function () {
     renderShortlist();
     renderScreenerFromRegistry();
     renderRegistryTable();
+    renderSnapshotTable();
   });
 });
 
