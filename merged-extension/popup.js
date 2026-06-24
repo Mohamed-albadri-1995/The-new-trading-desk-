@@ -1490,8 +1490,72 @@ function exportRegistryCsv() {
   } catch (_) { ok = downloadText(fname, csv); }
   setRegStatus(ok ? ('Exported ' + all.length + ' record' + (all.length === 1 ? '' : 's') + ' → ' + fname) : 'Export failed.');
 }
+// Export the full registry as a JSON backup file. The backup contains every
+// row (all days) including full stock data, context snapshots, and news, so
+// it can be imported into any future install of the extension.
+function exportRegistryBackup() {
+  var all = Object.keys(registry).map(function (k) { return registry[k]; });
+  if (!all.length) { setRegStatus('Registry is empty — nothing to back up.'); return; }
+  var payload = JSON.stringify({ version: 1, exportedAt: Date.now(), registry: registry }, null, 2);
+  var fname = 'registry-backup-' + etDateStr() + '.json';
+  var ok = false;
+  try {
+    var blob = new Blob([payload], { type: 'application/json;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = fname; document.body.appendChild(a); a.click();
+    setTimeout(function () { try { document.body.removeChild(a); } catch (_) {} URL.revokeObjectURL(url); }, 1000);
+    ok = true;
+  } catch (_) { ok = downloadText(fname, payload); }
+  setRegStatus(ok ? ('Backup saved: ' + all.length + ' record' + (all.length === 1 ? '' : 's') + ' → ' + fname) : 'Backup failed.');
+}
+
+// Import a JSON backup file. Rows in the file are merged into the current
+// registry: rows not present locally are added; rows present in both keep
+// whichever copy has the newer lastUpdated timestamp (the import wins on tie).
+function importRegistryBackup(file) {
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    var parsed;
+    try { parsed = JSON.parse(e.target.result); } catch (_) {
+      setRegStatus('Import failed: file is not valid JSON.'); return;
+    }
+    if (!parsed || typeof parsed.registry !== 'object') {
+      setRegStatus('Import failed: not a valid registry backup file.'); return;
+    }
+    var imported = parsed.registry, added = 0, updated = 0, skipped = 0;
+    Object.keys(imported).forEach(function (id) {
+      var incoming = imported[id];
+      // Validate minimal shape: must have id, ticker, date, stock
+      if (!incoming || !incoming.ticker || !incoming.date || !incoming.stock) { skipped++; return; }
+      var existing = registry[id];
+      if (!existing) {
+        registry[id] = incoming; added++;
+      } else if ((incoming.lastUpdated || 0) > (existing.lastUpdated || 0)) {
+        registry[id] = incoming; updated++;
+      } else {
+        skipped++;
+      }
+    });
+    saveRegistry().then(function () {
+      renderRegistryTable();
+      renderScreenerFromRegistry();
+      setRegStatus('Import complete: ' + added + ' added, ' + updated + ' updated, ' + skipped + ' skipped (already newer).');
+    });
+  };
+  reader.onerror = function () { setRegStatus('Import failed: could not read file.'); };
+  reader.readAsText(file);
+}
+
 function initRegistry() {
   var ex = $('regExport'); if (ex) ex.addEventListener('click', exportRegistryCsv);
+  var bk = $('regBackup'); if (bk) bk.addEventListener('click', exportRegistryBackup);
+  var imp = $('regImport'), impFile = $('regImportFile');
+  if (imp && impFile) {
+    imp.addEventListener('click', function () { impFile.value = ''; impFile.click(); });
+    impFile.addEventListener('change', function () { importRegistryBackup(impFile.files[0]); });
+  }
   var rf = $('regRefresh'); if (rf) rf.addEventListener('click', renderRegistryTable);
   var cl = $('regClear');
   if (cl) cl.addEventListener('click', function () {
