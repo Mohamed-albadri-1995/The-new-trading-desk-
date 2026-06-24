@@ -283,11 +283,11 @@ function etOffsetStr(dateStr) {
   return (d >= dstStart && d < dstEnd) ? '-04:00' : '-05:00';
 }
 
-async function fetchAlpacaBars(ticker, dateStr, alpacaKey, alpacaSecret) {
+async function fetchAlpacaBars(ticker, dateStr, alpacaKey, alpacaSecret, startET, endET) {
   var tz = etOffsetStr(dateStr);
   var tzH = tz === '-04:00' ? -4 : -5;
-  var start = dateStr + 'T09:20:00' + tz;
-  var end   = dateStr + 'T16:05:00' + tz;
+  var start = dateStr + 'T' + (startET || '09:20:00') + tz;
+  var end   = dateStr + 'T' + (endET   || '16:05:00') + tz;
   var baseUrl = 'https://data.alpaca.markets/v2/stocks/' +
     encodeURIComponent(ticker.toUpperCase()) + '/bars' +
     '?timeframe=1Min&start=' + encodeURIComponent(start) +
@@ -321,6 +321,40 @@ async function fetchAlpacaBars(ticker, dateStr, alpacaKey, alpacaSecret) {
     } catch (e) { lastErr = e.message; }
   }
   throw new Error('Alpaca bars failed for ' + ticker + ': ' + lastErr);
+}
+
+async function fetchAlpacaDailyBars(ticker, endDate, limit, alpacaKey, alpacaSecret) {
+  var startMs = new Date(endDate + 'T12:00:00Z').getTime() - (limit + 60) * 2 * 86400000;
+  var startDate = new Date(startMs).toISOString().slice(0, 10);
+  var baseUrl = 'https://data.alpaca.markets/v2/stocks/' +
+    encodeURIComponent(ticker.toUpperCase()) + '/bars' +
+    '?timeframe=1Day&start=' + encodeURIComponent(startDate) +
+    '&end='   + encodeURIComponent(endDate) +
+    '&limit=' + limit + '&adjustment=raw&sort=asc';
+  var headers = {
+    'APCA-API-KEY-ID': alpacaKey,
+    'APCA-API-SECRET-KEY': alpacaSecret,
+    'Accept': 'application/json'
+  };
+  var feeds = ['sip', 'iex'];
+  var lastErr = '';
+  for (var fi = 0; fi < feeds.length; fi++) {
+    var url = baseUrl + '&feed=' + feeds[fi];
+    try {
+      var resp = await fetch(url, { headers: headers });
+      if (!resp.ok) {
+        var txt = ''; try { var ej = await resp.json(); txt = ej.message || ''; } catch (e) {}
+        lastErr = 'HTTP ' + resp.status + (txt ? ': ' + txt : '');
+        if (resp.status === 403 || resp.status === 422) continue;
+        throw new Error(lastErr);
+      }
+      var data = await resp.json();
+      return (data.bars || []).map(function (b) {
+        return { date: b.t.slice(0, 10), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0 };
+      });
+    } catch (e) { lastErr = e.message; }
+  }
+  throw new Error('Alpaca daily bars failed for ' + ticker + ': ' + lastErr);
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -370,9 +404,17 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     return true;
   }
 
-  // Snapshot Registry: Alpaca 1-min bars
+  // Snapshot Registry: Alpaca 1-min bars (supports startET/endET for pre-market)
   if (msg.action === 'alpacaBars') {
-    fetchAlpacaBars(msg.ticker, msg.date, msg.alpacaKey, msg.alpacaSecret)
+    fetchAlpacaBars(msg.ticker, msg.date, msg.alpacaKey, msg.alpacaSecret, msg.startET, msg.endET)
+      .then(function (bars) { sendResponse({ ok: true, bars: bars }); })
+      .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
+    return true;
+  }
+
+  // Snapshot Registry: Alpaca daily bars for indicator calculation
+  if (msg.action === 'alpacaDailyBars') {
+    fetchAlpacaDailyBars(msg.ticker, msg.endDate, msg.limit || 220, msg.alpacaKey, msg.alpacaSecret)
       .then(function (bars) { sendResponse({ ok: true, bars: bars }); })
       .catch(function (e) { sendResponse({ ok: false, error: e.message }); });
     return true;
