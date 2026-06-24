@@ -1429,8 +1429,11 @@ var REG_COLUMNS = [
   { label: 'Mkt bias', get: function (r) { return (r.context && r.context.marketBias) || ''; } },
   { label: 'News', get: function (r) {
       if (!r.news) return '';
-      var n = (r.news.finnhub || []).length + (r.news.tradingview || []).length;
-      return n + ' items @ ' + fmtETTime(r.news.fetchedAt) + ' ET';
+      var items = (r.news.finnhub || []).map(function (n) { return n.headline || n.title || ''; })
+        .concat((r.news.tradingview || []).map(function (n) { return n.title || n.headline || ''; }))
+        .filter(Boolean);
+      if (!items.length) return 'fetched @ ' + fmtETTime(r.news.fetchedAt) + ' ET — no articles';
+      return items.slice(0, 3).join(' | ');
   } }
 ];
 function regSortForTable(a, b) {
