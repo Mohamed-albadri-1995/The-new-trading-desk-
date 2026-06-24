@@ -1534,6 +1534,206 @@ function snapGetVal(row, col) {
   return String(v);
 }
 
+// ── Alpaca fetch helpers ──────────────────────────────────────────────
+function sendAlpacaMsg(params) {
+  return new Promise(function (resolve, reject) {
+    chrome.runtime.sendMessage(params, function (resp) {
+      if (resp && resp.ok) resolve(resp);
+      else reject(new Error((resp && resp.error) || 'message failed'));
+    });
+  });
+}
+function fetchDailyBars(ticker, endDate, limit) {
+  return sendAlpacaMsg({
+    action: 'alpacaDailyBars', ticker: ticker, endDate: endDate,
+    limit: limit || 220, alpacaKey: settings.alpacaKey, alpacaSecret: settings.alpacaSecret
+  }).then(function (r) { return r.bars || []; });
+}
+function fetchIntradayBars(ticker, date, startET, endET) {
+  return sendAlpacaMsg({
+    action: 'alpacaBars', ticker: ticker, date: date,
+    startET: startET || null, endET: endET || null,
+    alpacaKey: settings.alpacaKey, alpacaSecret: settings.alpacaSecret
+  }).then(function (r) { return r.bars || []; });
+}
+
+// ── Indicator math ────────────────────────────────────────────────────
+function calcEMA(closes, period) {
+  if (!closes || closes.length < period) return null;
+  var k = 2 / (period + 1), ema = 0;
+  for (var i = 0; i < period; i++) ema += closes[i];
+  ema /= period;
+  for (var i = period; i < closes.length; i++) ema = closes[i] * k + ema * (1 - k);
+  return ema;
+}
+function calcSMA(closes, period) {
+  if (!closes || closes.length < period) return null;
+  var sum = 0;
+  for (var i = closes.length - period; i < closes.length; i++) sum += closes[i];
+  return sum / period;
+}
+function calcATR14(bars) {
+  if (!bars || bars.length < 15) return null;
+  var trs = [];
+  for (var i = 1; i < bars.length; i++) {
+    var cur = bars[i], prev = bars[i - 1];
+    trs.push(Math.max(cur.h - cur.l, Math.abs(cur.h - prev.c), Math.abs(cur.l - prev.c)));
+  }
+  if (trs.length < 14) return null;
+  var atr = 0;
+  for (var i = 0; i < 14; i++) atr += trs[i];
+  atr /= 14;
+  for (var i = 14; i < trs.length; i++) atr = (atr * 13 + trs[i]) / 14;
+  return atr;
+}
+function snapPct(a, b) { return (a != null && b != null && b > 0) ? (a - b) / b * 100 : null; }
+
+// Compute all ticker indicators from Alpaca daily bars + intraday bars
+function calcIndicatorsFromBars(allDailyBars, snapDate, intradayBars, snapTime) {
+  var histBars = allDailyBars.filter(function (b) { return b.date < snapDate; });
+  var snapDayBar = null;
+  for (var i = 0; i < allDailyBars.length; i++) {
+    if (allDailyBars[i].date === snapDate) { snapDayBar = allDailyBars[i]; break; }
+  }
+  if (histBars.length < 2) return {};
+  var closes = histBars.map(function (b) { return b.c; });
+  var prevClose = histBars[histBars.length - 1].c;
+  var open = null;
+  if (intradayBars && intradayBars.length) {
+    for (var i = 0; i < intradayBars.length; i++) {
+      if (intradayBars[i].etTime >= '09:30') { open = intradayBars[i].o; break; }
+    }
+    if (open == null) open = intradayBars[0].o;
+  }
+  if (open == null && snapDayBar) open = snapDayBar.o;
+  var gapPct = (open != null && prevClose > 0) ? (open - prevClose) / prevClose * 100 : null;
+  var atr   = calcATR14(histBars);
+  var ema9  = calcEMA(closes, 9),  ema13 = calcEMA(closes, 13);
+  var ema20 = calcEMA(closes, 20), ema50 = calcEMA(closes, 50);
+  var sma5  = calcSMA(closes, 5);
+  var monthSlice = histBars.slice(-22);
+  if (snapDayBar) monthSlice = monthSlice.concat([snapDayBar]);
+  var monthHigh = null, monthLow = null;
+  for (var i = 0; i < monthSlice.length; i++) {
+    if (monthHigh == null || monthSlice[i].h > monthHigh) monthHigh = monthSlice[i].h;
+    if (monthLow  == null || monthSlice[i].l < monthLow)  monthLow  = monthSlice[i].l;
+  }
+  var rvol = null;
+  if (intradayBars && intradayBars.length && histBars.length >= 5) {
+    var recent = histBars.slice(-20);
+    var avgVol = recent.reduce(function (s, b) { return s + b.v; }, 0) / recent.length;
+    if (avgVol > 0) {
+      var sp = snapTime.split(':');
+      var elapsed = Math.max(1, +sp[0] * 60 + +sp[1] - 570);
+      var expectedVol = avgVol * elapsed / 390;
+      var volAtSnap = 0;
+      for (var i = 0; i < intradayBars.length; i++) {
+        if (intradayBars[i].etTime > snapTime) break;
+        volAtSnap += intradayBars[i].v;
+      }
+      rvol = expectedVol > 0 ? volAtSnap / expectedVol : null;
+    }
+  }
+  return { prevClose: prevClose, open: open, gapPct: gapPct, atr: atr,
+    ema9: ema9, ema13: ema13, ema20: ema20, ema50: ema50, sma5: sma5,
+    monthHigh: monthHigh, monthLow: monthLow, rvol: rvol };
+}
+
+function calcPmData(pmBars, atr) {
+  var pmHigh = null, pmLow = null;
+  for (var i = 0; pmBars && i < pmBars.length; i++) {
+    if (pmHigh == null || pmBars[i].h > pmHigh) pmHigh = pmBars[i].h;
+    if (pmLow  == null || pmBars[i].l < pmLow)  pmLow  = pmBars[i].l;
+  }
+  var pmRange = (pmHigh != null && pmLow != null) ? pmHigh - pmLow : null;
+  var pmAdr   = (pmRange != null && atr && atr > 0) ? pmRange / atr : null;
+  return { pmHigh: pmHigh, pmLow: pmLow, pmRange: pmRange, pmAdr: pmAdr };
+}
+
+// Index snapshot at a specific time: price from 1-min bars, day%/week% from daily bars
+function calcIndexSnap(intradayBars, dailyBars, snapTime, snapDate) {
+  var price = null;
+  if (intradayBars && intradayBars.length) {
+    var found = null;
+    for (var i = 0; i < intradayBars.length; i++) {
+      if (intradayBars[i].etTime === snapTime) { found = intradayBars[i]; break; }
+    }
+    if (!found) {
+      for (var i = intradayBars.length - 1; i >= 0; i--) {
+        if (intradayBars[i].etTime <= snapTime) { found = intradayBars[i]; break; }
+      }
+    }
+    if (found) price = found.c;
+  }
+  var hist = (dailyBars || []).filter(function (b) { return b.date < snapDate; });
+  var prevClose    = hist.length >= 1 ? hist[hist.length - 1].c : null;
+  var weekAgoClose = hist.length >= 6 ? hist[hist.length - 6].c : null;
+  return { price: price, dayPct: snapPct(price, prevClose), weekPct: snapPct(price, weekAgoClose) };
+}
+
+// Per date+snapTime cache so index bars are only fetched once per unique date
+var _idxCache = {};
+
+async function fetchIdxSnap(snapDate, snapTime) {
+  var cacheKey = snapDate + '|' + snapTime;
+  if (_idxCache[cacheKey]) return _idxCache[cacheKey];
+  var results = await Promise.all([
+    fetchIntradayBars('SPY', snapDate).catch(function () { return []; }),
+    fetchIntradayBars('QQQ', snapDate).catch(function () { return []; }),
+    fetchIntradayBars('IWM', snapDate).catch(function () { return []; }),
+    fetchDailyBars('SPY', snapDate, 220).catch(function () { return []; }),
+    fetchDailyBars('QQQ', snapDate, 50).catch(function () { return []; }),
+    fetchDailyBars('IWM', snapDate, 50).catch(function () { return []; }),
+    new Promise(function (res) {
+      chrome.runtime.sendMessage({ action: 'chartHistory', symbol: 'VIX', range: '3mo' },
+        function (r) { res(r && r.ok ? (r.bars || []) : []); });
+    })
+  ]);
+  var spyI = results[0], qqqI = results[1], iwmI = results[2];
+  var spyD = results[3], qqqD = results[4], iwmD = results[5], vixBars = results[6];
+  var spySnap = calcIndexSnap(spyI, spyD, snapTime, snapDate);
+  var qqqSnap = calcIndexSnap(qqqI, qqqD, snapTime, snapDate);
+  var iwmSnap = calcIndexSnap(iwmI, iwmD, snapTime, snapDate);
+  // VIX: Yahoo daily bars (field: time='YYYY-MM-DD', close)
+  var vixLevel = null, vixChange = null;
+  if (vixBars.length) {
+    var vbH = vixBars.filter(function (b) { return b.time <= snapDate; });
+    if (vbH.length >= 1) {
+      vixLevel = vbH[vbH.length - 1].close;
+      if (vbH.length >= 2) vixChange = snapPct(vbH[vbH.length - 1].close, vbH[vbH.length - 2].close);
+    }
+  }
+  // SPY vs 200 DMA + golden/death cross
+  var spyVs200 = null, crossSignal = '';
+  var spyHistD = spyD.filter(function (b) { return b.date < snapDate; });
+  if (spySnap.price != null && spyHistD.length >= 200) {
+    var s200 = spyHistD.slice(-200).reduce(function (s, b) { return s + b.c; }, 0) / 200;
+    if (s200 > 0) spyVs200 = snapPct(spySnap.price, s200);
+    var s50 = spyHistD.slice(-50).reduce(function (s, b) { return s + b.c; }, 0) / 50;
+    crossSignal = s50 > s200 ? 'golden' : 'death';
+  }
+  // ST bias from point-in-time index values
+  var stBull = 0, stBear = 0;
+  if (spySnap.dayPct  != null) { if (spySnap.dayPct  > 0.3) stBull++; else if (spySnap.dayPct  < -0.3) stBear++; }
+  if (qqqSnap.dayPct  != null) { if (qqqSnap.dayPct  > 0.3) stBull++; else if (qqqSnap.dayPct  < -0.3) stBear++; }
+  if (iwmSnap.dayPct  != null) { if (iwmSnap.dayPct  > 0.3) stBull++; else if (iwmSnap.dayPct  < -0.3) stBear++; }
+  if (vixChange       != null) { if (vixChange        < -2)  stBull++; else if (vixChange         > 1)  stBear++; }
+  if (spySnap.weekPct != null) { if (spySnap.weekPct  > 1)   stBull++; else if (spySnap.weekPct  < -1)  stBear++; }
+  if (qqqSnap.weekPct != null) { if (qqqSnap.weekPct  > 1)   stBull++; else if (qqqSnap.weekPct  < -1)  stBear++; }
+  var stScore = stBull - stBear;
+  var stBias  = stScore >= 2 ? 'BULL' : stScore <= -2 ? 'BEAR' : 'NEUTRAL';
+  var result = {
+    spyPrice: spySnap.price, spyDay: spySnap.dayPct, spyWeek: spySnap.weekPct,
+    qqqPrice: qqqSnap.price, qqqDay: qqqSnap.dayPct, qqqWeek: qqqSnap.weekPct,
+    iwmPrice: iwmSnap.price, iwmDay: iwmSnap.dayPct,
+    vixLevel: vixLevel, vixChange: vixChange,
+    spyVs200: spyVs200, crossSignal: crossSignal,
+    stBull: stBull, stBear: stBear, stScore: stScore, stBias: stBias
+  };
+  _idxCache[cacheKey] = result;
+  return result;
+}
+
 async function buildSnapshotRegistry(snapshotTime) {
   if (!settings.alpacaKey || !settings.alpacaSecret) {
     setSnapStatus('Add your Alpaca API key and secret in ⚙ Settings first.');
@@ -1545,27 +1745,25 @@ async function buildSnapshotRegistry(snapshotTime) {
     setSnapStatus('No tickers in registry for today — run a scan first.');
     return;
   }
-
-  // Safety: warn if building before market close (Part 3 outputs will be partial)
-  var nowET = fmtETTime(Date.now()); // HH:MM
+  var nowET = fmtETTime(Date.now());
   var beforeClose = nowET < '16:00';
+  var total = todayRows.length, built = 0, failed = 0;
 
-  // Compute market context signals from live marketCtx
-  var ix = marketCtx.indices || {};
-  var spyIx = ix.SPY || {}, qqqIx = ix.QQQ || {}, iwmIx = ix.IWM || {}, vixIx = ix.VIX || {};
-  var stBull = 0, stBear = 0;
-  function countIdx(d, up, dn) { if (!d || d.change == null) return; if (d.change > up) stBull++; else if (d.change < dn) stBear++; }
-  function countVix(d) { if (!d || d.change == null) return; if (d.change < -2) stBull++; else if (d.change > 1) stBear++; }
-  function countWeek(d, up, dn) { if (!d || d.weekChg == null) return; if (d.weekChg > up) stBull++; else if (d.weekChg < dn) stBear++; }
-  countIdx(spyIx, 0.3, -0.3); countIdx(qqqIx, 0.3, -0.3); countIdx(iwmIx, 0.3, -0.3);
-  countVix(vixIx); countWeek(spyIx, 1, -1); countWeek(qqqIx, 1, -1);
-  var stScore = stBull - stBear;
+  setSnapStatus('Fetching index data at ' + snapshotTime + ' ET…');
+  var idxSnap;
+  try {
+    idxSnap = await fetchIdxSnap(today, snapshotTime);
+  } catch (e) {
+    idxSnap = { spyPrice: null, spyDay: null, spyWeek: null,
+      qqqPrice: null, qqqDay: null, qqqWeek: null,
+      iwmPrice: null, iwmDay: null, vixLevel: null, vixChange: null,
+      spyVs200: null, crossSignal: '', stBull: 0, stBear: 0, stScore: 0, stBias: 'NEUTRAL' };
+  }
 
+  // Mid/long-term regime from marketCtx (doesn't change within a day)
   var midData = marketCtx.stageData;
   var ltData  = marketCtx.ltData;
-  var spyClose = spyIx.close; // Close field from index data
 
-  var total = todayRows.length, built = 0, failed = 0;
   setSnapStatus('Building snapshot for ' + total + ' ticker' + (total === 1 ? '' : 's') + ' at ' + snapshotTime + ' ET…');
 
   for (var i = 0; i < todayRows.length; i++) {
@@ -1573,30 +1771,25 @@ async function buildSnapshotRegistry(snapshotTime) {
     var ticker = regRow.ticker;
     var s = regRow.stock || {};
     var ctx = regRow.context || {};
-
     try {
-      // Fetch Alpaca 1-min bars for today
-      var bars = await new Promise(function (resolve, reject) {
-        chrome.runtime.sendMessage({ action: 'alpacaBars', ticker: ticker, date: today,
-          alpacaKey: settings.alpacaKey, alpacaSecret: settings.alpacaSecret },
-          function (resp) { if (resp && resp.ok) resolve(resp.bars || []); else reject(new Error((resp && resp.error) || 'alpaca failed')); });
-      });
+      var fetched = await Promise.all([
+        fetchIntradayBars(ticker, today),
+        fetchDailyBars(ticker, today, 220).catch(function () { return []; }),
+        fetchIntradayBars(ticker, today, '04:00:00', '09:29:00').catch(function () { return []; })
+      ]);
+      var bars = fetched[0], dailyBars = fetched[1], pmBars = fetched[2];
 
-      // Find the bar that starts at snapshotTime (e.g. '09:40')
       var snapBar = null;
       for (var bi = 0; bi < bars.length; bi++) {
         if (bars[bi].etTime === snapshotTime) { snapBar = bars[bi]; break; }
       }
-      // If exact match not found, use the last bar at or before snapshotTime
       if (!snapBar) {
         for (var bi2 = bars.length - 1; bi2 >= 0; bi2--) {
           if (bars[bi2].etTime <= snapshotTime) { snapBar = bars[bi2]; break; }
         }
       }
-
       var entry = snapBar ? snapBar.c : null;
 
-      // Cumulative volume and VWAP from session open to snapshot time
       var volToSnap = 0, vwNumer = 0, vwDenom = 0;
       for (var bi3 = 0; bi3 < bars.length; bi3++) {
         var b = bars[bi3];
@@ -1607,42 +1800,36 @@ async function buildSnapshotRegistry(snapshotTime) {
       }
       var vwapAtSnap = vwDenom > 0 ? vwNumer / vwDenom : null;
 
-      // High/low from snapshot time bar onward (inclusive) to end of session
       var highSince = null, lowSince = null;
       for (var bi4 = 0; bi4 < bars.length; bi4++) {
         var b4 = bars[bi4];
         if (b4.etTime < snapshotTime) continue;
         if (highSince == null || b4.h > highSince) highSince = b4.h;
-        if (lowSince == null || b4.l < lowSince) lowSince = b4.l;
+        if (lowSince  == null || b4.l < lowSince)  lowSince  = b4.l;
       }
 
-      // Derived values
-      var atr = s.atr;
-      var prevCl = s.prevClose;
-      var changePct = (entry != null && prevCl != null && prevCl > 0) ? (entry - prevCl) / prevCl * 100 : null;
-      var pmRange = (s.pmHigh != null && s.pmLow != null) ? s.pmHigh - s.pmLow : null;
-      var pmAdr = (pmRange != null && atr && atr > 0 && !(atr > (s.price || 0) * 1.5)) ? pmRange / atr : null;
-      function pct(a, b) { return (a != null && b != null && b > 0) ? (a - b) / b * 100 : null; }
-      var ema9 = s.ema9, ema13 = s.ema13, ema20 = s.ema20, ema50 = s.ema50, sma5 = s.sma5;
+      var ind = calcIndicatorsFromBars(dailyBars, today, bars, snapshotTime);
+      var pm  = calcPmData(pmBars, ind.atr);
+
+      var ema9 = ind.ema9, ema13 = ind.ema13, ema20 = ind.ema20, ema50 = ind.ema50;
       var emaStack = '';
       if (entry != null && ema9 != null && ema13 != null && ema20 != null && ema50 != null) {
         if (ema9 > ema13 && ema13 > ema20 && ema20 > ema50) emaStack = 'bull (9>13>20>50)';
         else if (ema9 < ema13 && ema13 < ema20 && ema20 < ema50) emaStack = 'bear (9<13<20<50)';
         else emaStack = 'mixed';
       }
-      var mh = s.monthHigh, ml = s.monthLow;
-      var mPos = (entry != null && mh != null && ml != null && mh > ml) ? (entry - ml) / (mh - ml) * 100 : null;
+      var mh = ind.monthHigh, ml = ind.monthLow;
+      var mPos   = (entry != null && mh != null && ml != null && mh > ml) ? (entry - ml) / (mh - ml) * 100 : null;
       var mFromH = (entry != null && mh != null && mh > 0) ? (mh - entry) / mh * 100 : null;
       var mFromL = (entry != null && ml != null && ml > 0) ? (entry - ml) / ml * 100 : null;
-      var longScore  = (entry != null && highSince != null && atr && atr > 0) ? (highSince - entry) / atr : null;
-      var shortScore = (entry != null && lowSince != null && atr && atr > 0) ? (entry - lowSince) / atr : null;
+      var changePct  = snapPct(entry, ind.prevClose);
+      var longScore  = (entry != null && highSince != null && ind.atr && ind.atr > 0) ? (highSince - entry) / ind.atr : null;
+      var shortScore = (entry != null && lowSince  != null && ind.atr && ind.atr > 0) ? (entry - lowSince)  / ind.atr : null;
 
       var newsCount = 0;
       if (regRow.news) newsCount = (regRow.news.finnhub || []).length + (regRow.news.tradingview || []).length;
 
-      var snapId = regId(ticker, today);
-      snapshotRegistry[snapId] = {
-        // Part 1 — identification
+      snapshotRegistry[regId(ticker, today)] = {
         date: today, ticker: ticker,
         tvSymbol: s.tvSymbol || regRow.tvSymbol || ticker,
         sector: ctx.broad || s.sector || '',
@@ -1651,54 +1838,39 @@ async function buildSnapshotRegistry(snapshotTime) {
         hotSector: ctx.secHot ? 'Y' : 'N',
         sectorBias: ctx.secBias || '',
         sectorScore: ctx.secScore,
-        // market context
-        stBias: ctx.marketBias || marketCtx.marketBias || 'NEUTRAL',
-        stBull: stBull, stBear: stBear,
+        stBias: idxSnap.stBias,
+        stBull: idxSnap.stBull, stBear: idxSnap.stBear,
         mtBias: marketCtx.marketStage || 'UNKNOWN',
         mtScore: midData ? midData.bull : null,
         ltBias: marketCtx.marketLongTerm || 'UNKNOWN',
-        // price action at snapshot time (from Alpaca)
         priceAtSnap: entry,
-        open: s.open,
-        prevClose: prevCl,
-        gapPct: s.gapPct,
-        changePct: changePct,
-        volumeAtSnap: volToSnap || null,
-        rvol: s.rvol,
-        vwapAtSnap: vwapAtSnap,
-        // pre-market
-        pmHigh: s.pmHigh, pmLow: s.pmLow, pmRange: pmRange, pmAdr: pmAdr,
-        // technicals
-        atr: atr,
-        ema9: ema9, ema13: ema13, ema20: ema20, ema50: ema50, sma5: sma5,
-        vsEma9: pct(entry, ema9), vsEma20: pct(entry, ema20),
-        vsEma50: pct(entry, ema50), vsSma5: pct(entry, sma5),
+        open: ind.open, prevClose: ind.prevClose,
+        gapPct: ind.gapPct, changePct: changePct,
+        volumeAtSnap: volToSnap || null, rvol: ind.rvol, vwapAtSnap: vwapAtSnap,
+        pmHigh: pm.pmHigh, pmLow: pm.pmLow, pmRange: pm.pmRange, pmAdr: pm.pmAdr,
+        atr: ind.atr,
+        ema9: ema9, ema13: ema13, ema20: ema20, ema50: ema50, sma5: ind.sma5,
+        vsEma9: snapPct(entry, ema9), vsEma20: snapPct(entry, ema20),
+        vsEma50: snapPct(entry, ema50), vsSma5: snapPct(entry, ind.sma5),
         emaStack: emaStack,
-        // monthly range
         monthHigh: mh, monthLow: ml, mPos: mPos, mFromH: mFromH, mFromL: mFromL,
-        // fundamentals
-        mcap: s.mcap, floatShares: s.floatShares, shortFloat: s.shortFloat, shortRatio: s.shortRatio,
-        // meta
+        mcap: s.mcap, floatShares: s.floatShares,
+        shortFloat: s.shortFloat, shortRatio: s.shortRatio,
         newsCount: newsCount,
         screenerKeys: (regRow.screenerKeys || []).map(function (k) { return SCREENERS[k] ? SCREENERS[k].short : k; }).join(', '),
         firstSeen: fmtETTime(regRow.firstSeen),
         lastUpdated: fmtETTime(regRow.lastUpdated),
-        // Part 2 — market underlyings
-        spyPrice: spyIx.close, spyDay: spyIx.change, spyWeek: spyIx.weekChg,
-        qqqPrice: qqqIx.close, qqqDay: qqqIx.change, qqqWeek: qqqIx.weekChg,
-        iwmPrice: iwmIx.close, iwmDay: iwmIx.change,
-        vixLevel: vixIx.close, vixChange: vixIx.change,
-        spyVs200: ltData ? ltData.dist : null,
-        crossSignal: ltData ? (ltData.bias === 'BULLISH' ? 'golden' : ltData.bias === 'BEARISH' ? 'death' : ltData.bias || '') : '',
-        stScore: stScore,
+        spyPrice: idxSnap.spyPrice, spyDay: idxSnap.spyDay, spyWeek: idxSnap.spyWeek,
+        qqqPrice: idxSnap.qqqPrice, qqqDay: idxSnap.qqqDay, qqqWeek: idxSnap.qqqWeek,
+        iwmPrice: idxSnap.iwmPrice, iwmDay: idxSnap.iwmDay,
+        vixLevel: idxSnap.vixLevel, vixChange: idxSnap.vixChange,
+        spyVs200: idxSnap.spyVs200, crossSignal: idxSnap.crossSignal,
+        stScore: idxSnap.stScore,
         mtStageLabel: midData ? (midData.stageLabel || midData.stage || '') : '',
-        // Part 3 — outputs (entry = field 65, both score formulas use it)
-        entry: entry,                  // field 65 = price at snapshot time (= field 16)
-        highSinceEntry: highSince,     // field 66
-        lowSinceEntry: lowSince,       // field 67
-        entryTime: snapshotTime,       // field 68
-        longScore: longScore,          // field 69 = (highSinceEntry − entry) / ATR
-        shortScore: shortScore         // field 70 = (entry − lowSinceEntry) / ATR
+        entry: entry,
+        highSinceEntry: highSince, lowSinceEntry: lowSince,
+        entryTime: snapshotTime,
+        longScore: longScore, shortScore: shortScore
       };
       built++;
     } catch (e) {
@@ -1712,7 +1884,7 @@ async function buildSnapshotRegistry(snapshotTime) {
   renderSnapshotTable();
   var msg = 'Snapshot built: ' + built + ' ticker' + (built === 1 ? '' : 's') + ' at ' + snapshotTime + ' ET.';
   if (failed) msg += ' ' + failed + ' failed (open DevTools console for details).';
-  if (beforeClose) msg += ' ⚠ Market not closed yet — fields 66/67/69/70 show intraday range so far, not full day.';
+  if (beforeClose) msg += ' ⚠ Market not closed yet — fields 66/67/69/70 show intraday range so far.';
   setSnapStatus(msg);
 }
 
@@ -1743,21 +1915,27 @@ async function buildHistoricalSnapshots(snapTime) {
   if (!historicalIds.length) {
     setSnapStatus('No historical IDs — click 📥 Import Historical first.'); return;
   }
+  _idxCache = {};
   var total = historicalIds.length, built = 0, failed = 0;
   setSnapStatus('Building historical snapshots for ' + total + ' entries…');
 
   for (var pi = 0; pi < historicalIds.length; pi++) {
     var ticker = historicalIds[pi].ticker, date = historicalIds[pi].date;
     try {
-      var bars = await new Promise(function (resolve, reject) {
-        chrome.runtime.sendMessage({
-          action: 'alpacaBars', ticker: ticker, date: date,
-          alpacaKey: settings.alpacaKey, alpacaSecret: settings.alpacaSecret
-        }, function (resp) {
-          if (resp && resp.ok) resolve(resp.bars || []);
-          else reject(new Error((resp && resp.error) || 'alpaca failed'));
-        });
+      // Index data cached per date — only fetched once per unique date
+      var idxSnap = await fetchIdxSnap(date, snapTime).catch(function () {
+        return { spyPrice: null, spyDay: null, spyWeek: null,
+          qqqPrice: null, qqqDay: null, qqqWeek: null,
+          iwmPrice: null, iwmDay: null, vixLevel: null, vixChange: null,
+          spyVs200: null, crossSignal: '', stBull: 0, stBear: 0, stScore: 0, stBias: 'NEUTRAL' };
       });
+
+      var fetched = await Promise.all([
+        fetchIntradayBars(ticker, date),
+        fetchDailyBars(ticker, date, 220).catch(function () { return []; }),
+        fetchIntradayBars(ticker, date, '04:00:00', '09:29:00').catch(function () { return []; })
+      ]);
+      var bars = fetched[0], dailyBars = fetched[1], pmBars = fetched[2];
 
       var snapBar = null;
       for (var bi = 0; bi < bars.length; bi++) {
@@ -1769,7 +1947,6 @@ async function buildHistoricalSnapshots(snapTime) {
         }
       }
       var entry = snapBar ? snapBar.c : null;
-      var openPrice = bars.length ? bars[0].o : null;
 
       var volToSnap = 0, vwNumer = 0, vwDenom = 0;
       for (var bi3 = 0; bi3 < bars.length; bi3++) {
@@ -1784,28 +1961,52 @@ async function buildHistoricalSnapshots(snapTime) {
         var b4 = bars[bi4];
         if (b4.etTime < snapTime) continue;
         if (highSince == null || b4.h > highSince) highSince = b4.h;
-        if (lowSince == null || b4.l < lowSince) lowSince = b4.l;
+        if (lowSince  == null || b4.l < lowSince)  lowSince  = b4.l;
       }
+
+      var ind = calcIndicatorsFromBars(dailyBars, date, bars, snapTime);
+      var pm  = calcPmData(pmBars, ind.atr);
+
+      var ema9 = ind.ema9, ema13 = ind.ema13, ema20 = ind.ema20, ema50 = ind.ema50;
+      var emaStack = '';
+      if (entry != null && ema9 != null && ema13 != null && ema20 != null && ema50 != null) {
+        if (ema9 > ema13 && ema13 > ema20 && ema20 > ema50) emaStack = 'bull (9>13>20>50)';
+        else if (ema9 < ema13 && ema13 < ema20 && ema20 < ema50) emaStack = 'bear (9<13<20<50)';
+        else emaStack = 'mixed';
+      }
+      var mh = ind.monthHigh, ml = ind.monthLow;
+      var mPos   = (entry != null && mh != null && ml != null && mh > ml) ? (entry - ml) / (mh - ml) * 100 : null;
+      var mFromH = (entry != null && mh != null && mh > 0) ? (mh - entry) / mh * 100 : null;
+      var mFromL = (entry != null && ml != null && ml > 0) ? (entry - ml) / ml * 100 : null;
+      var changePct  = snapPct(entry, ind.prevClose);
+      var longScore  = (entry != null && highSince != null && ind.atr && ind.atr > 0) ? (highSince - entry) / ind.atr : null;
+      var shortScore = (entry != null && lowSince  != null && ind.atr && ind.atr > 0) ? (entry - lowSince)  / ind.atr : null;
 
       snapshotRegistry[regId(ticker, date)] = {
         date: date, ticker: ticker, tvSymbol: ticker,
         sector: '', industry: '', themes: '', hotSector: '', sectorBias: '', sectorScore: null,
-        stBias: '', stBull: null, stBear: null, mtBias: '', mtScore: null, ltBias: '',
-        priceAtSnap: entry, open: openPrice,
-        prevClose: null, gapPct: null, changePct: null,
-        volumeAtSnap: volToSnap || null, rvol: null, vwapAtSnap: vwapAtSnap,
-        pmHigh: null, pmLow: null, pmRange: null, pmAdr: null, atr: null,
-        ema9: null, ema13: null, ema20: null, ema50: null, sma5: null,
-        vsEma9: null, vsEma20: null, vsEma50: null, vsSma5: null, emaStack: '',
-        monthHigh: null, monthLow: null, mPos: null, mFromH: null, mFromL: null,
+        stBias: idxSnap.stBias, stBull: idxSnap.stBull, stBear: idxSnap.stBear,
+        mtBias: '', mtScore: null, ltBias: '',
+        priceAtSnap: entry,
+        open: ind.open, prevClose: ind.prevClose, gapPct: ind.gapPct, changePct: changePct,
+        volumeAtSnap: volToSnap || null, rvol: ind.rvol, vwapAtSnap: vwapAtSnap,
+        pmHigh: pm.pmHigh, pmLow: pm.pmLow, pmRange: pm.pmRange, pmAdr: pm.pmAdr,
+        atr: ind.atr,
+        ema9: ema9, ema13: ema13, ema20: ema20, ema50: ema50, sma5: ind.sma5,
+        vsEma9: snapPct(entry, ema9), vsEma20: snapPct(entry, ema20),
+        vsEma50: snapPct(entry, ema50), vsSma5: snapPct(entry, ind.sma5),
+        emaStack: emaStack,
+        monthHigh: mh, monthLow: ml, mPos: mPos, mFromH: mFromH, mFromL: mFromL,
         mcap: null, floatShares: null, shortFloat: null, shortRatio: null,
         newsCount: null, screenerKeys: '', firstSeen: '', lastUpdated: '',
-        spyPrice: null, spyDay: null, spyWeek: null,
-        qqqPrice: null, qqqDay: null, qqqWeek: null,
-        iwmPrice: null, iwmDay: null,
-        vixLevel: null, vixChange: null, spyVs200: null, crossSignal: '', stScore: null, mtStageLabel: '',
+        spyPrice: idxSnap.spyPrice, spyDay: idxSnap.spyDay, spyWeek: idxSnap.spyWeek,
+        qqqPrice: idxSnap.qqqPrice, qqqDay: idxSnap.qqqDay, qqqWeek: idxSnap.qqqWeek,
+        iwmPrice: idxSnap.iwmPrice, iwmDay: idxSnap.iwmDay,
+        vixLevel: idxSnap.vixLevel, vixChange: idxSnap.vixChange,
+        spyVs200: idxSnap.spyVs200, crossSignal: idxSnap.crossSignal,
+        stScore: idxSnap.stScore, mtStageLabel: '',
         entry: entry, highSinceEntry: highSince, lowSinceEntry: lowSince,
-        entryTime: snapTime, longScore: null, shortScore: null
+        entryTime: snapTime, longScore: longScore, shortScore: shortScore
       };
       built++;
     } catch (e) {
