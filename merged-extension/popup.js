@@ -985,11 +985,53 @@ function loadCardNews(ticker, tvSymbol, hostId) {
   if (!host) return;
   host.innerHTML = '<span class="sub9">Loading news…</span>';
   fetchNews(ticker, tvSymbol)
-    .then(function (resp) { host.innerHTML = renderNewsItems(resp); })
+    .then(function (resp) {
+      // News goes into the registry first, then the card renders from it.
+      var id = regId(ticker, etDateStr()), row = registry[id];
+      var news = { finnhub: resp.finnhub || [], tradingview: resp.tradingview || [], fetchedAt: Date.now() };
+      if (row) { row.news = news; saveRegistry(); }
+      host.innerHTML = newsHostInner(ticker, tvSymbol, hostId, news);
+    })
     .catch(function (e) { host.innerHTML = '<span class="sub9">News unavailable: ' + esc(e.message) + '</span>'; });
 }
 
-function buildCard(s, matchedKeys, regMeta) {
+// Inner markup for a card's news host — either the stored (registry) news with
+// a refresh control, or the initial "load" button. Shared by buildCard and
+// loadCardNews so a freshly-fetched card matches a re-rendered one.
+function newsHostInner(ticker, tvSymbol, newsId, news) {
+  var btn = function (label) {
+    return '<button class="btn-mini" data-news="' + esc(ticker) + '" data-tvsym="' + esc(tvSymbol || '') +
+      '" data-newsid="' + esc(newsId) + '">' + label + '</button>';
+  };
+  if (news) {
+    return renderNewsItems(news) +
+      '<div class="sub9" style="margin-top:4px">Fetched ' + esc(fmtETTime(news.fetchedAt)) + ' ET · ' + btn('↻ refresh') + '</div>';
+  }
+  return btn('📰 Load recent news');
+}
+
+// Snapshot the Market-tab-derived context for a stock at scan time, so the
+// card reads themes / sector bias / hot status / market bias from the registry
+// row instead of recomputing against the live marketCtx every render.
+function computeCardContext(s) {
+  var themes = themesForTicker(s.ticker, s.industry);
+  var broadResolved = resolveBroadSector(s);
+  var sbScore = broadResolved && marketCtx.sectorBiasScores[broadResolved];
+  var hotInfo = broadResolved && marketCtx.hotStatus && marketCtx.hotStatus[broadResolved];
+  return {
+    themes: themes,
+    broadResolved: broadResolved || null,
+    broad: broadResolved || s.sector || '',
+    secBias: (sbScore && sbScore.dir) || 'NEUTRAL',
+    secScore: sbScore ? sbScore.score : null,
+    secHot: !!(hotInfo && hotInfo.hot),
+    marketBias: marketCtx.marketBias || 'NEUTRAL'
+  };
+}
+
+function buildCard(row) {
+  var s = row.stock, matchedKeys = row.screenerKeys;
+  var ctx = row.context || computeCardContext(s);
   scrIndex[s.ticker] = s;
   var L = [];
   // Price · Open · Prev close
@@ -1088,27 +1130,26 @@ function buildCard(s, matchedKeys, regMeta) {
     var cls = b === 'BULLISH' ? 'pos' : b === 'BEARISH' ? 'neg' : '';
     return '<span class="' + cls + '"' + (cls ? '' : ' style="color:var(--muted)"') + '>' + esc(b || 'NEUTRAL') + '</span>';
   }
-  var themes = themesForTicker(s.ticker, s.industry);
+  // All values below are read from the registry snapshot (row.context), not
+  // recomputed from the live marketCtx — the card is purely a view of the row.
+  var themes = ctx.themes || [];
   var themePills = themes.length
     ? themes.slice(0, 4).map(function (t) {
         return '<span class="theme-pill">· ' + esc(t) + '</span>';
       }).join(' ')
     : '<span style="color:var(--muted2)">—</span>';
-  // Resolve to the SAME 15 scored buckets the Market tab uses. Only a resolved
-  // bucket gets a bias/hot read; an unmapped raw sector (e.g. "Miscellaneous")
-  // is shown but labelled as having no ETF proxy, instead of a misleading NEUTRAL.
-  var broadResolved = resolveBroadSector(s);
-  var broad = broadResolved || s.sector || '';
-  var sbScore = broadResolved && marketCtx.sectorBiasScores[broadResolved];
-  var hotInfo = broadResolved && marketCtx.hotStatus && marketCtx.hotStatus[broadResolved];
-  var secBias = (sbScore && sbScore.dir) || 'NEUTRAL';
+  // A resolved bucket gets a bias/hot read; an unmapped raw sector (e.g.
+  // "Miscellaneous") is shown but labelled as having no ETF proxy.
+  var broad = ctx.broad, broadResolved = ctx.broadResolved;
+  var secBias = ctx.secBias || 'NEUTRAL';
+  var secScoreStr = ctx.secScore != null ? (ctx.secScore >= 0 ? '+' + ctx.secScore : '' + ctx.secScore) : '';
   var secHot = '';
-  if (hotInfo && hotInfo.hot) {
-    secHot = ' <span class="pos" style="font-size:10px">🔥 hot' + (sbScore ? ' +' + sbScore.score : '') + '</span>';
-  } else if (sbScore && sbScore.dir === 'BULLISH') {
-    secHot = ' <span class="pos" style="font-size:10px">▲ leading +' + sbScore.score + '</span>';
-  } else if (sbScore && sbScore.dir === 'BEARISH') {
-    secHot = ' <span class="neg" style="font-size:10px">▼ lagging ' + sbScore.score + '</span>';
+  if (ctx.secHot) {
+    secHot = ' <span class="pos" style="font-size:10px">🔥 hot' + (secScoreStr ? ' ' + secScoreStr : '') + '</span>';
+  } else if (secBias === 'BULLISH') {
+    secHot = ' <span class="pos" style="font-size:10px">▲ leading' + (secScoreStr ? ' ' + secScoreStr : '') + '</span>';
+  } else if (secBias === 'BEARISH') {
+    secHot = ' <span class="neg" style="font-size:10px">▼ lagging' + (secScoreStr ? ' ' + secScoreStr : '') + '</span>';
   }
   var sectorLine = !broad
     ? '<span style="color:var(--muted2)">—</span>'
@@ -1119,28 +1160,27 @@ function buildCard(s, matchedKeys, regMeta) {
     '<div class="ctx-hdr">🌊 THEMES, SECTOR &amp; MARKET</div>' +
     '<div class="line"><b>Themes:</b> ' + themePills + '</div>' +
     '<div class="line"><b>Sector:</b> ' + sectorLine + '</div>' +
-    '<div class="line"><b>Market:</b> ' + biasSpan(marketCtx.marketBias) + '</div>' +
+    '<div class="line"><b>Market:</b> ' + biasSpan(ctx.marketBias) + '</div>' +
     '</div>';
 
   var newsId = 'news-' + String(s.ticker).replace(/[^A-Za-z0-9]/g, '');
   var newsBlock = '<div class="ctx-block">' +
     '<div class="ctx-hdr">📰 NEWS</div>' +
     '<div id="' + newsId + '" class="news-host">' +
-      '<button class="btn-mini" data-news="' + esc(s.ticker) + '" data-tvsym="' + esc(s.tvSymbol || '') + '" data-newsid="' + newsId + '">📰 Load recent news</button>' +
+      newsHostInner(s.ticker, s.tvSymbol, newsId, row.news) +
     '</div></div>';
 
   var inList = shortlistHas(s.ticker);
   var starBtn = '<button class="sl-star' + (inList ? ' on' : '') + '" data-sl-add="' + esc(s.ticker) + '">' +
     (inList ? '★ In list' : '☆ Shortlist') + '</button>';
 
-  // Registry status line — present only when the card is built from a registry
-  // row (the standard path). Shows whether the stock is live in the latest
-  // scan or was surfaced earlier today and has since been refreshed.
+  // Registry status line — whether the stock is live in the latest scan or was
+  // surfaced earlier today and has since been refreshed.
   var regStatus = '';
-  if (regMeta) {
-    regStatus = regMeta.liveNow
-      ? '<div style="font-size:10px;font-weight:600;color:#4ade80;margin:0 0 4px">● Live now · updated ' + esc(fmtETTime(regMeta.lastUpdated)) + ' ET</div>'
-      : '<div style="font-size:10px;font-weight:600;color:#fbbf24;margin:0 0 4px">○ Seen earlier today · refreshed ' + esc(fmtETTime(regMeta.lastUpdated)) + ' ET</div>';
+  if (row.lastUpdated) {
+    regStatus = row.liveNow
+      ? '<div style="font-size:10px;font-weight:600;color:#4ade80;margin:0 0 4px">● Live now · updated ' + esc(fmtETTime(row.lastUpdated)) + ' ET</div>'
+      : '<div style="font-size:10px;font-weight:600;color:#fbbf24;margin:0 0 4px">○ Seen earlier today · refreshed ' + esc(fmtETTime(row.lastUpdated)) + ' ET</div>';
   }
 
   return '<div class="scr-card">' +
@@ -1191,9 +1231,11 @@ function registryUpsertLive(stocks, keysByTicker) {
   stocks.forEach(function (s) {
     var id = regId(s.ticker, today);
     var keys = keysByTicker[s.ticker] || (s.screenerKey ? [s.screenerKey] : []);
+    var ctx = computeCardContext(s);        // snapshot themes/sector/market now
     var row = registry[id];
     if (row) {                              // seen earlier today → update in place
       row.stock = s;
+      row.context = ctx;
       row.tvSymbol = s.tvSymbol || row.tvSymbol;
       row.lastUpdated = now;
       row.liveNow = true;
@@ -1202,7 +1244,7 @@ function registryUpsertLive(stocks, keysByTicker) {
       registry[id] = {
         id: id, ticker: s.ticker, date: today, tvSymbol: s.tvSymbol || '',
         firstSeen: now, lastUpdated: now, liveNow: true,
-        screenerKeys: keys.slice(), stock: s
+        screenerKeys: keys.slice(), stock: s, context: ctx, news: null
       };
     }
   });
@@ -1229,11 +1271,16 @@ function registryRefreshStale(liveTickerSet) {
         row.lastUpdated = now;
         refreshed++;
       }
+      // re-snapshot the context too (sector bias / market can shift intraday)
+      if (row.stock) row.context = computeCardContext(row.stock);
       row.liveNow = false;
     });
     return refreshed;
   }).catch(function () {
-    stale.forEach(function (row) { row.liveNow = false; }); // honest UI even if refresh fails
+    stale.forEach(function (row) {            // honest UI even if the refresh fetch fails
+      if (row.stock) row.context = computeCardContext(row.stock);
+      row.liveNow = false;
+    });
     return 0;
   });
 }
@@ -1252,9 +1299,7 @@ function renderScreenerFromRegistry() {
   });
   var host = $('scrResults');
   if (!rows.length) { host.innerHTML = '<div class="empty">No candidates yet today. Run a scan above.</div>'; return 0; }
-  host.innerHTML = rows.map(function (row) {
-    return buildCard(row.stock, row.screenerKeys, { liveNow: row.liveNow, firstSeen: row.firstSeen, lastUpdated: row.lastUpdated });
-  }).join('');
+  host.innerHTML = rows.map(function (row) { return buildCard(row); }).join('');
   return rows.length;
 }
 
@@ -1347,7 +1392,17 @@ var REG_COLUMNS = [
   { label: 'EMA50', get: function (r) { return regFix(r.stock.ema50); } },
   { label: 'SMA5', get: function (r) { return regFix(r.stock.sma5); } },
   { label: 'Sector', get: function (r) { return r.stock.sector || ''; } },
-  { label: 'Industry', get: function (r) { return r.stock.industry || ''; } }
+  { label: 'Industry', get: function (r) { return r.stock.industry || ''; } },
+  { label: 'Themes', get: function (r) { return ((r.context && r.context.themes) || []).join(' '); } },
+  { label: 'Sec bias', get: function (r) { return (r.context && r.context.secBias) || ''; } },
+  { label: 'Sec score', get: function (r) { return r.context && r.context.secScore != null ? r.context.secScore : ''; } },
+  { label: 'Hot sector', get: function (r) { return r.context && r.context.secHot ? 'hot' : ''; } },
+  { label: 'Mkt bias', get: function (r) { return (r.context && r.context.marketBias) || ''; } },
+  { label: 'News', get: function (r) {
+      if (!r.news) return '';
+      var n = (r.news.finnhub || []).length + (r.news.tradingview || []).length;
+      return n + ' items @ ' + fmtETTime(r.news.fetchedAt) + ' ET';
+  } }
 ];
 function regSortForTable(a, b) {
   if (a.date !== b.date) return a.date < b.date ? 1 : -1;          // newest day first
