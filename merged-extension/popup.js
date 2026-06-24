@@ -1010,24 +1010,39 @@ function fetchYahooShort(tickers) {
   var results = {};
   return Promise.all(tickers.map(function (ticker) {
     var url = 'https://finviz.com/quote.ashx?t=' + encodeURIComponent(ticker);
-    return fetch(url, { headers: { 'Accept': 'text/html' } })
-      .then(function (r) { return r.ok ? r.text() : null; })
+    return fetch(url, {
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://finviz.com/'
+      }
+    })
+      .then(function (r) {
+        console.log('[short] ' + ticker + ' HTTP ' + r.status);
+        return r.ok ? r.text() : null;
+      })
       .then(function (html) {
-        if (!html) return;
+        if (!html) { console.warn('[short] ' + ticker + ': no HTML (blocked or non-2xx)'); return; }
+        // Log a 300-char snippet so we can confirm real page vs challenge/block
+        console.log('[short] ' + ticker + ' snippet:', html.slice(0, 300));
+        // Finviz HTML: <td class="snapshot-td2-cp"><b>Short Float</b></td>
+        //              <td class="snapshot-td2" align="right"><a href="...">5.23%</a></td>
+        // Handles both cases: with or without <b>/<a> wrappers
         function stat(label) {
-          var re = new RegExp(label + '<\\/td>\\s*<td[^>]*>([^<]+)');
+          var re = new RegExp(label + '(?:<\\/b>)?<\\/td>\\s*<td[^>]*>\\s*(?:<a[^>]*>)?([0-9]+(?:\\.[0-9]+)?%?)');
           var m = html.match(re);
           return m ? m[1].trim() : null;
         }
         var sfStr = stat('Short Float');
         var srStr = stat('Short Ratio');
-        var sf = sfStr ? parseFloat(sfStr) : null;   // Finviz shows "32.52%" — parseFloat strips %
+        console.log('[short] ' + ticker + ' sf=' + sfStr + ' sr=' + srStr);
+        var sf = sfStr ? parseFloat(sfStr) : null;   // "32.52%" → 32.52
         var sr = srStr ? parseFloat(srStr) : null;
         if ((sf != null && !isNaN(sf) && sf > 0) || (sr != null && !isNaN(sr) && sr > 0)) {
           results[ticker] = { shortFloat: sf, shortRatio: sr };
         }
       })
-      .catch(function () {});
+      .catch(function (e) { console.warn('[short] ' + ticker + ' fetch error:', e && e.message); });
   })).then(function () { return results; });
 }
 
