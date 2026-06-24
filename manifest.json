@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Trade Desk — Market, Screener & Journal",
+  "version": "2.0.0",
+  "description": "Market regime dashboard + 3-screener scanner with shortlist, plus a full Trade Journal: import broker fills, per-trade charts, setup detection, analytics. All in one extension.",
+  "permissions": ["storage", "unlimitedStorage", "windows"],
+  "host_permissions": [
+    "https://scanner.tradingview.com/*",
+    "https://query1.finance.yahoo.com/*",
+    "https://query2.finance.yahoo.com/*",
+    "https://stooq.com/*",
+    "https://finnhub.io/*",
+    "https://news-headlines.tradingview.com/*",
+    "https://api.polygon.io/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_icon": { "48": "icon48.png" },
+    "default_title": "Trade Desk — click to open"
+  },
+  "icons": { "48": "icon48.png" }
+}

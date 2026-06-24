@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trade Desk</title>
+<style>
+  /* ══════════════════════════════════════════════════════════════════
+     BASE — Trade Desk (Market / Screener / Shortlist / Settings)
+     ══════════════════════════════════════════════════════════════════ */
+  :root{
+    --bg:#0b1120; --panel:#111827; --panel2:#0f172a; --inset:#0f172a;
+    --border:#1e293b; --border2:#334155;
+    --txt:#e2e8f0; --txt2:#cbd5e1; --muted:#94a3b8; --muted2:#64748b;
+    --green:#86efac; --green-s:#4ade80; --green-b:#22c55e;
+    --red:#fca5a5; --red-s:#f87171; --red-b:#ef4444;
+    --amber:#fbbf24; --amber2:#fde047; --teal:#5eead4;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    width:100%; max-width:960px; min-height:600px;
+    background:var(--bg); color:var(--txt);
+    font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* ── Tab bar ── */
+  .tabbar{display:flex;gap:2px;padding:8px 10px 0;background:var(--panel2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;}
+  .tab{flex:1;padding:10px 8px;background:transparent;border:none;border-bottom:2px solid transparent;
+    color:var(--muted);font-weight:700;font-size:13px;cursor:pointer;border-radius:6px 6px 0 0;}
+  .tab.active{color:var(--teal);border-bottom-color:var(--teal);background:rgba(94,234,212,0.06);}
+  .pane{display:none;padding:12px 12px 28px;}
+  .pane.active{display:block;}
+  .h1{font-size:17px;font-weight:800;margin:0 0 10px;display:flex;align-items:center;gap:8px;}
+
+  /* ── Buttons ── */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    padding:10px 12px;border-radius:8px;border:1px solid var(--border2);
+    background:#1e293b;color:var(--txt);font-weight:700;font-size:13px;cursor:pointer;}
+  .btn:hover{filter:brightness(1.15);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .btn-primary{background:linear-gradient(90deg,#0ea5e9,#22c55e);border:none;color:#04121f;}
+  .btn-ghost{background:transparent;color:var(--muted);}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+  .status{font-size:11px;color:var(--muted);min-height:15px;margin:4px 0 8px;}
+
+  /* ── Section shell ── */
+  .section{margin-bottom:16px;}
+  .section-hdr{font-size:13px;font-weight:800;color:var(--teal);margin:0 0 8px;
+    padding:5px 0 5px 10px;border-left:3px solid var(--teal);
+    background:linear-gradient(90deg,rgba(94,234,212,0.10),transparent 70%);border-radius:0 8px 8px 0;}
+
+  /* ── Market Pulse index cards ── */
+  .idx-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .idx-card{flex:1;min-width:120px;background:var(--panel);border:1px solid var(--border);
+    border-radius:10px;padding:9px 12px;text-align:center;}
+  .idx-name{font-size:10px;color:var(--muted);font-weight:700;letter-spacing:.5px;}
+  .idx-price{font-size:16px;font-weight:800;margin:2px 0;color:var(--txt);}
+  .idx-chg{font-size:12px;font-weight:800;}
+  .idx-sub{font-size:9px;color:var(--muted2);margin-top:2px;}
+  .pos{color:var(--green-s);} .neg{color:var(--red-s);}
+
+  /* ── Regime box ── */
+  .regime-box{border-radius:10px;padding:11px 13px;margin:10px 0 8px;background:var(--panel2);}
+  .regime-top{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+  .regime-name{font-size:15px;font-weight:800;}
+  .regime-meta{font-size:10px;color:var(--muted2);}
+  .regime-stance{font-size:12px;margin-top:6px;font-weight:700;}
+  .regime-play{font-size:11px;margin-top:6px;padding:5px 8px;border-radius:6px;
+    background:rgba(56,76,104,0.30);color:var(--txt2);}
+  .regime-inputs{font-size:10px;color:var(--muted);margin-top:6px;}
+
+  /* ── 3-tier bias rows ── */
+  .bias-panel{display:flex;flex-direction:column;gap:6px;}
+  .bias-row{background:var(--panel);border:1px solid var(--border);border-radius:9px;overflow:hidden;}
+  .bias-row.bull{border-color:var(--green-b);background:rgba(34,197,94,0.07);}
+  .bias-row.bear{border-color:var(--red-b);background:rgba(239,68,68,0.07);}
+  .bias-row.warn{border-color:var(--amber);background:rgba(251,191,36,0.06);}
+  .bias-head{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;flex-wrap:wrap;}
+  .bias-head:hover{filter:brightness(1.12);}
+  .bias-icon{font-size:14px;}
+  .bias-tier{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;min-width:150px;}
+  .bias-val{font-size:14px;font-weight:800;color:var(--txt);}
+  .bias-row.bull .bias-val{color:var(--green-s);}
+  .bias-row.bear .bias-val{color:var(--red-s);}
+  .bias-row.warn .bias-val{color:var(--amber);}
+  .bias-chev{margin-left:auto;font-size:11px;color:var(--muted);}
+  .bias-sub{padding:0 12px 8px 40px;font-size:11px;color:var(--muted);font-style:italic;}
+  .bias-body{padding:9px 12px;border-top:1px solid var(--border);background:rgba(0,0,0,.25);}
+  .chip{font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;border:1px solid var(--border2);}
+  .chip.bull{background:rgba(34,197,94,0.12);color:var(--green-s);border-color:var(--green-b);}
+  .chip.bear{background:rgba(239,68,68,0.12);color:var(--red-s);border-color:var(--red-b);}
+  .chip.neu{background:transparent;color:var(--muted);}
+  .sig-grid{display:flex;flex-direction:column;gap:2px;}
+  .sig-hdr,.sig-r{display:grid;grid-template-columns:2fr 1fr 1fr;padding:4px 6px;font-size:11px;border-radius:4px;}
+  .sig-hdr{font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);}
+  .sig-r.sb{background:rgba(34,197,94,0.08);color:var(--green-s);}
+  .sig-r.se{background:rgba(239,68,68,0.08);color:var(--red-s);}
+  .sig-r.sn{background:rgba(148,163,184,0.06);color:var(--muted);}
+  .sig-r>span:first-child{font-weight:700;}
+  .sig-note{font-size:10px;color:var(--muted);margin-top:6px;font-style:italic;}
+  .bias-foot{text-align:center;font-size:10px;color:var(--muted2);margin-top:2px;}
+
+  /* ── Sector tags / heatmap ── */
+  .tag-row{display:flex;flex-wrap:wrap;gap:6px;}
+  .cold-tag{display:inline-block;background:#1e293b;color:var(--muted);border:1px solid var(--border);
+    border-radius:8px;padding:5px 10px;font-size:11px;}
+  .breakout-line{font-size:10px;color:var(--muted2);width:100%;margin-top:4px;}
+  .heat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:6px;}
+  .heat-cell{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:8px;text-align:center;position:relative;}
+  .heat-cell.up{border-color:rgba(34,197,94,0.35);}
+  .heat-cell.dn{border-color:rgba(239,68,68,0.35);}
+  .heat-name{font-size:10px;color:var(--muted);font-weight:600;}
+  .heat-etf{font-size:13px;font-weight:800;color:var(--txt);}
+  .heat-d{font-size:11px;font-weight:800;margin:2px 0;}
+  .heat-w{font-size:10px;color:var(--muted);}
+  .heat-bias{font-size:9px;font-weight:700;margin-top:2px;}
+
+  /* ── Screener cards ── */
+  .scr-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:12px 14px;margin-bottom:10px;}
+  .scr-hdr{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+  .scr-ticker{font-size:18px;font-weight:800;color:var(--txt);}
+  .scr-chg{font-size:13px;font-weight:800;}
+  .scr-badges{margin-left:auto;display:flex;gap:4px;flex-wrap:wrap;}
+  .scr-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;
+    background:rgba(94,234,212,0.10);color:var(--teal);border:1px solid rgba(94,234,212,0.35);}
+  .scr-sector{font-size:10px;color:var(--muted2);width:100%;}
+  .tech-hdr{font-size:12px;font-weight:800;color:var(--teal);margin:4px 0 6px;}
+  .ctx-block{background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:9px 11px;margin:2px 0 10px;}
+  .ctx-hdr{font-size:12px;font-weight:800;color:var(--teal);letter-spacing:.4px;margin-bottom:6px;}
+  .theme-pill{display:inline-block;background:rgba(96,165,250,0.08);color:#93c5fd;
+    border:1px solid rgba(96,165,250,0.40);border-radius:999px;padding:2px 11px;font-size:12px;font-weight:700;}
+  .line{font-size:13px;color:var(--txt2);margin:5px 0;}
+  .line b{color:var(--txt);font-weight:700;}
+  .sub9{color:var(--muted2);font-size:10px;}
+  .empty{color:var(--muted2);font-size:12px;padding:20px 0;text-align:center;}
+
+  /* ── Tap-to-chart affordances ── */
+  .idx-card,.heat-cell{cursor:pointer;transition:filter .1s,border-color .1s;}
+  .idx-card:hover,.heat-cell:hover{filter:brightness(1.18);border-color:var(--teal);}
+  .idx-card:active,.heat-cell:active{filter:brightness(.92);}
+
+  /* ── Sector Short-Term Bias rows ── */
+  .bias-grp{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
+  .bias-grp-hdr{font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);}
+  .stb-tag{display:inline-flex;align-items:center;gap:6px;border-radius:8px;padding:5px 10px;
+    font-size:11px;font-weight:700;border:1px solid var(--border2);cursor:pointer;}
+  .stb-tag:hover{filter:brightness(1.15);}
+  .stb-tag.bull{background:rgba(34,197,94,0.10);color:var(--green-s);border-color:rgba(34,197,94,0.45);}
+  .stb-tag.bear{background:rgba(239,68,68,0.10);color:var(--red-s);border-color:rgba(239,68,68,0.45);}
+  .stb-tag small{font-size:9px;color:var(--muted);font-weight:600;}
+
+  /* ── Settings ── */
+  .set-help{font-size:11px;color:var(--muted);margin:0 0 11px;line-height:1.55;}
+  .set-help b{color:var(--txt2);font-weight:700;}
+  .set-field{display:flex;flex-direction:column;gap:4px;margin-bottom:11px;}
+  .set-field label{font-size:11px;font-weight:700;color:var(--txt2);}
+  .set-field input{background:var(--inset);border:1px solid var(--border2);border-radius:7px;
+    padding:9px 10px;color:var(--txt);font-size:13px;}
+  .set-field input:focus{outline:none;border-color:var(--teal);}
+
+  /* ── Hot badges ── */
+  .hot-badge{font-size:9px;font-weight:800;color:#fdba74;background:rgba(251,146,60,0.16);
+    border:1px solid rgba(251,146,60,0.55);border-radius:10px;padding:2px 7px;letter-spacing:.3px;}
+  .warm-badge{font-size:9px;font-weight:700;color:var(--amber2);background:rgba(251,191,36,0.10);
+    border:1px solid rgba(251,191,36,0.40);border-radius:10px;padding:2px 7px;}
+
+  /* ── Expandable sector bias rows ── */
+  .sb-row{background:var(--panel);border:1px solid var(--border);border-radius:9px;margin-bottom:5px;overflow:hidden;}
+  .sb-row.bull{border-color:rgba(34,197,94,0.30);}
+  .sb-row.bear{border-color:rgba(239,68,68,0.30);}
+  .sb-row.is-hot{border-color:rgba(251,146,60,0.65);box-shadow:inset 0 0 0 1px rgba(251,146,60,0.25);}
+  .sb-head{display:flex;align-items:center;gap:8px;padding:8px 11px;cursor:pointer;flex-wrap:wrap;}
+  .sb-head:hover{filter:brightness(1.12);}
+  .sb-name{font-size:12px;font-weight:700;color:var(--txt);}
+  .sb-score{font-size:13px;font-weight:800;margin-left:auto;}
+  .sb-score.bull{color:var(--green-s);} .sb-score.bear{color:var(--red-s);}
+  .sb-rs{font-size:10px;}
+  .sb-chev{font-size:11px;color:var(--muted);}
+  .sb-body{padding:9px 11px;border-top:1px solid var(--border);background:rgba(0,0,0,.25);}
+  .sb-parts{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;}
+  .sb-part{display:grid;grid-template-columns:1.5fr 1fr auto;gap:8px;align-items:center;
+    font-size:11px;padding:3px 6px;border-radius:4px;}
+  .sb-part:nth-child(odd){background:rgba(148,163,184,0.05);}
+  .sb-part>span:last-child{text-align:right;font-weight:700;}
+  .sb-part.sb-total{border-top:1px solid var(--border);margin-top:2px;color:var(--txt);font-weight:800;}
+  .sb-hot{font-size:11px;color:var(--txt2);background:rgba(251,146,60,0.07);
+    border-radius:6px;padding:6px 8px;margin-bottom:8px;line-height:1.45;}
+  .btn-mini{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border-radius:7px;
+    border:1px solid var(--border2);background:#1e293b;color:var(--txt2);font-weight:700;font-size:11px;cursor:pointer;}
+  .btn-mini:hover{filter:brightness(1.2);border-color:var(--teal);}
+
+  /* ── Heatmap hot marker ── */
+  .heat-cell.is-hot{border-color:rgba(251,146,60,0.6);}
+  .heat-hot{position:absolute;top:5px;right:6px;font-size:11px;line-height:1;}
+
+  /* ── Per-card news ── */
+  .news-host{display:flex;flex-direction:column;gap:8px;}
+  .news-item{border-left:2px solid var(--border2);padding:1px 0 1px 9px;}
+  .news-title{font-size:12px;font-weight:700;color:#93c5fd;text-decoration:none;}
+  .news-title:hover{text-decoration:underline;}
+  .news-meta{margin-top:2px;}
+  .news-sum{font-size:11px;color:var(--txt2);margin-top:3px;line-height:1.45;}
+
+  /* ── Settings toggle ── */
+  .set-toggle{margin:0 0 11px;}
+  .set-toggle label{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--txt2);cursor:pointer;}
+  .set-toggle input{width:16px;height:16px;accent-color:var(--teal);cursor:pointer;}
+
+  /* ── Screener card: tappable ticker + shortlist star ── */
+  .scr-ticker.tap{cursor:pointer;}
+  .scr-ticker.tap:hover{color:var(--teal);text-decoration:underline;}
+  .sl-star{display:inline-flex;align-items:center;gap:4px;padding:5px 9px;border-radius:7px;
+    border:1px solid var(--border2);background:#1e293b;color:var(--muted);font-weight:700;font-size:11px;cursor:pointer;}
+  .sl-star:hover{filter:brightness(1.2);border-color:var(--teal);}
+  .sl-star.on{background:rgba(94,234,212,0.14);color:var(--teal);border-color:var(--teal);}
+
+  /* ── Shortlist tab ── */
+  .sl-day{background:var(--panel);border:1px solid var(--border);border-radius:11px;margin-bottom:10px;overflow:hidden;}
+  .sl-day.today{border-color:rgba(94,234,212,0.40);}
+  .sl-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;}
+  .sl-head:hover{filter:brightness(1.12);}
+  .sl-date{font-size:13px;font-weight:800;color:var(--txt);}
+  .sl-today-badge{font-size:9px;font-weight:800;color:var(--teal);background:rgba(94,234,212,0.12);
+    border:1px solid rgba(94,234,212,0.40);border-radius:10px;padding:2px 7px;}
+  .sl-count{font-size:11px;color:var(--muted);margin-left:auto;}
+  .sl-chev{font-size:11px;color:var(--muted);}
+  .sl-body{padding:6px 12px 12px;border-top:1px solid var(--border);background:rgba(0,0,0,.22);}
+  .sl-item{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);}
+  .sl-item:last-child{border-bottom:none;}
+  .sl-tkr{font-size:14px;font-weight:800;color:var(--txt);cursor:pointer;}
+  .sl-tkr:hover{color:var(--teal);text-decoration:underline;}
+  .sl-chg{font-size:12px;font-weight:800;}
+  .sl-meta{font-size:10px;color:var(--muted2);}
+  .sl-del{margin-left:auto;background:transparent;border:1px solid var(--border2);color:var(--muted);
+    border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;}
+  .sl-del:hover{border-color:var(--red-b);color:var(--red-s);}
+  .sl-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;}
+  .sl-exports{margin-top:11px;font-size:10px;color:var(--muted);border-top:1px dashed var(--border);padding-top:8px;}
+  .sl-exports .x{display:block;margin-top:3px;}
+  .sl-empty{color:var(--muted2);font-size:12px;padding:12px 0;text-align:center;}
+
+  /* ── Chart modal (Market/Screener) ── */
+  .chart-overlay{position:fixed;inset:0;z-index:50;display:none;
+    background:rgba(2,6,16,0.78);backdrop-filter:blur(2px);
+    align-items:center;justify-content:center;padding:14px;}
+  .chart-overlay.open{display:flex;}
+  .chart-modal{width:100%;max-width:760px;background:var(--panel);border:1px solid var(--border2);
+    border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.6);overflow:hidden;}
+  .chart-bar{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);}
+  .chart-title{font-size:16px;font-weight:800;color:var(--txt);display:flex;align-items:center;gap:7px;}
+  .chart-spacer{flex:1;}
+  .chart-rng{display:flex;gap:4px;}
+  .chart-rng button{padding:5px 11px;border-radius:7px;border:1px solid var(--border2);
+    background:#1e293b;color:var(--muted);font-weight:700;font-size:12px;cursor:pointer;}
+  .chart-rng button.on{background:rgba(94,234,212,0.14);color:var(--teal);border-color:var(--teal);}
+  .chart-x{padding:5px 10px;border-radius:7px;border:1px solid var(--border2);
+    background:#1e293b;color:var(--txt2);font-weight:700;font-size:12px;cursor:pointer;}
+  .chart-sub{padding:7px 14px 0;font-size:11px;color:var(--muted);min-height:16px;}
+  .chart-host{position:relative;height:360px;margin:6px 6px 12px;}
+  .chart-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    color:var(--muted2);font-size:12px;pointer-events:none;}
+
+  /* ══════════════════════════════════════════════════════════════════
+     TRADE JOURNAL — specific CSS (scoped via .jnl-root and .jnl-* classes)
+     ══════════════════════════════════════════════════════════════════ */
+  .jnl-root { width:100%; max-width:100%; box-sizing:border-box; padding:8px 0 28px; }
+  .tab-panel { display:block; width:100%; box-sizing:border-box; }
+  @media (max-width:560px){ .jnl-root{ padding:4px 0 22px; } }
+
+  .jnl-root * { -webkit-tap-highlight-color:transparent; }
+
+  /* Journal CSS variables (scoped) */
+  .jnl-root {
+    --jnl-bg:#0b0e16; --jnl-panel:#11151f; --jnl-line:#1d2434; --jnl-line-2:#262f44;
+    --jnl-ink:#e6eaf5; --jnl-ink-dim:#8b94ac; --jnl-ink-faint:#5d667e;
+    --jnl-accent:#22d3ee; --jnl-accent-2:#f59e0b; --jnl-accent-soft:rgba(34,211,238,.14);
+    --jnl-good:#34d399; --jnl-bad:#f87171;
+    /* TN palette */
+    --tn-bg:#0b0e18; --tn-surface:#111827; --tn-surface-2:#16202f;
+    --tn-raise:#1c2840; --tn-line:#1f2d44; --tn-line-2:#263548;
+    --tn-line-strong:#364d6a; --tn-ink:#d4deef; --tn-dim:#7b8db0; --tn-faint:#4d5e7a;
+    --tn-cyan:#22d3ee; --tn-cyan-deep:#0891b2; --tn-amber:#f5a623;
+    --tn-green:#34d399; --tn-red:#fb7185; --tn-violet:#a78bfa;
+  }
+
+  .jnl-root .header { display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:14px; padding-bottom:11px; border-bottom:1px solid #1d2434; }
+  .jnl-root .header h1 { font-size:17px; font-weight:800; color:var(--tn-ink); letter-spacing:.2px; }
+
+  .jnl-root .btn {
+    padding:11px 16px; border:none; border-radius:8px;
+    font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap;
+    background:#1e293b; color:var(--txt); display:inline-flex; align-items:center;
+    justify-content:center;
+  }
+  .jnl-root .btn:active { opacity:0.7; }
+  .jnl-root .btn:disabled { opacity:0.4; }
+  .jnl-root button { transition: opacity 80ms ease-out, transform 80ms ease-out, filter 80ms ease-out; }
+  .jnl-root button:active:not(:disabled) { opacity:0.6; transform:scale(0.97); filter:brightness(1.15); }
+  .jnl-root button:focus-visible { outline:2px solid #7b5fe0; outline-offset:2px; }
+
+  /* Journal tab active states */
+  .jnl-root .tab-btn.active {
+    background:rgba(34,211,238,.10); color:var(--tn-cyan);
+    border-color:rgba(34,211,238,.25); box-shadow:inset 2px 0 0 var(--tn-cyan);
+  }
+  #tab-extreme .ee-tab-btn.active { color:var(--tn-amber); border-bottom-color:var(--tn-amber); }
+  #tab-extreme .ee-subtab-btn.active { background:var(--tn-surface-2); color:var(--tn-amber); }
+  #tab-extreme .ee-qf-btn.active { background:linear-gradient(90deg,var(--tn-amber),#ea580c); color:#fff; }
+  .pipeline-subbtn.active { background:linear-gradient(90deg,#22d3ee,#0891b2); color:#04161b; border-color:rgba(34,211,238,.50); }
+
+  /* Journal scrollbars */
+  .jnl-root *::-webkit-scrollbar { width:8px; height:8px; }
+  .jnl-root *::-webkit-scrollbar-track { background:transparent; }
+  .jnl-root *::-webkit-scrollbar-thumb { background:#364d6a; border-radius:6px; }
+  .jnl-root *::-webkit-scrollbar-thumb:hover { background:#263548; }
+
+  /* Journal typography helpers */
+  .jnl-rec-sec { color:#475569; font-size:9px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; padding:8px 0 3px; }
+  .jnl-rec-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .jnl-rec-table { width:100%; border-collapse:collapse; font-size:11px; }
+  .jnl-rec-table th { text-align:left; color:#64748b; font-size:10px; font-weight:600; padding:4px 6px; border-bottom:1px solid #1e293b; white-space:nowrap; }
+  .jnl-rec-table td { padding:4px 6px; border-bottom:1px solid #0f172a; color:#94a3b8; vertical-align:top; }
+  .jnl-rec-lbl { color:#94a3b8; }
+  .jnl-rec-val { color:#e2e8f0; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .jnl-corr-sidehead { font-size:11px; font-weight:700; padding:8px 0 2px; border-top:1px solid #1e293b; margin-top:6px; }
+  .jnl-corr-subhead { color:#94a3b8; font-size:10px; font-weight:600; padding:7px 0 3px; }
+  .jnl-corr-note { color:#475569; font-size:10px; padding:2px 0 6px; }
+  .jnl-chk-all { margin:2px 0 6px; }
+  .jnl-chk-all > summary { cursor:pointer; color:#7c93b0; font-size:10px; font-weight:600; padding:3px 0; list-style:none; }
+  .jnl-chk-all > summary::-webkit-details-marker { display:none; }
+  .jnl-chk-all[open] > summary { color:#93c5fd; }
+  .jnl-corr-table { width:100%; border-collapse:collapse; font-size:11px; }
+  .jnl-corr-table th { color:#64748b; font-size:9px; font-weight:600; padding:3px 6px; border-bottom:1px solid #1e293b; text-align:center; white-space:nowrap; }
+  .jnl-corr-table td { padding:4px 6px; border-bottom:1px solid #0f172a; color:#e2e8f0; text-align:center; font-variant-numeric:tabular-nums; }
+  .jnl-corr-table td.jnl-rec-lbl { text-align:left; color:#94a3b8; min-width:120px; }
+  .jnl-corr-tab-btn { font-size:10px; padding:4px 10px; min-height:26px; background:#0f172a; color:#64748b; border:1px solid #1e293b; border-radius:4px; cursor:pointer; }
+  .jnl-corr-tab-btn.active { background:#1e3a5f; color:#93c5fd; border-color:#1e40af; }
+  .jnl-dash-tab { font-size:11px; font-weight:600; padding:6px 12px; min-height:30px; background:transparent; color:#64748b; border:1px solid transparent; border-radius:6px; cursor:pointer; }
+  .jnl-dash-tab.active { background:#1e3a5f; color:#93c5fd; border-color:#1e40af; }
+  .jnl-tab-panel { display:none; }
+  .jnl-tab-panel.active { display:block; }
+  .jnl-kpi-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+  .jnl-kpi { background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:9px 11px; }
+  .jnl-kpi .k-label { color:#475569; font-size:9px; font-weight:700; letter-spacing:.08em; }
+  .jnl-kpi .k-value { font-size:18px; font-weight:700; margin:3px 0 1px; font-variant-numeric:tabular-nums; }
+  .jnl-kpi .k-sub { color:#64748b; font-size:9px; }
+  .jnl-ratio-strip { display:flex; gap:14px; flex-wrap:wrap; padding:8px 12px; background:#0f172a; border:1px solid #1e293b; border-radius:8px; font-size:11px; color:#94a3b8; }
+  .jnl-hero-row { display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:8px; margin-bottom:10px; }
+  .jnl-stat-group { background:#0f172a; border:1px solid #1e293b; border-radius:8px; padding:4px 12px 8px; margin-bottom:8px; }
+  .jnl-stat-group summary { cursor:pointer; color:#94a3b8; font-size:11px; font-weight:700; padding:7px 0; letter-spacing:.05em; }
+  .jnl-stat-cards { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .jnl-stat-card { background:#0b1220; border:1px solid #1e293b; border-radius:6px; padding:7px 9px; }
+  .jnl-stat-card .s-name { color:#64748b; font-size:9px; }
+  .jnl-stat-card .s-val { font-size:13px; font-weight:700; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .jnl-day-head { background:#0f172a; border:1px solid #1e293b; border-left:3px solid #334155; border-radius:8px; padding:9px 12px; margin:12px 0 8px; }
+  .jnl-day-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:4px 14px; font-size:10px; color:#94a3b8; margin-top:6px; }
+  .jnl-cal-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:4px; }
+  .jnl-cal-cell { border-radius:6px; padding:5px 4px; text-align:center; min-height:38px; font-variant-numeric:tabular-nums; }
+  @media (max-width:480px) {
+    .jnl-hero-row { grid-template-columns:1fr 1fr; }
+    .jnl-hero-row > :first-child { grid-column:1 / -1; }
+    .jnl-stat-cards { grid-template-columns:repeat(2,1fr); }
+    .jnl-day-grid { grid-template-columns:repeat(2,1fr); }
+    .jnl-rec-table, .jnl-corr-table { font-size:10px; }
+    .jnl-corr-table td, .jnl-corr-table th { padding:4px 4px; }
+    .jnl-corr-table td.jnl-rec-lbl { min-width:96px; }
+    .jnl-corr-tab-btn { min-height:36px; padding:6px 12px; }
+    .jnl-kpi-grid { grid-template-columns:repeat(2,1fr); }
+    .jnl-kpi .k-value { font-size:16px; }
+    .jnl-dash-tab { min-height:36px; padding:6px 10px; font-size:10px; }
+    .jnl-cal-cell { min-height:34px; font-size:9px; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- ════════════════════ TOP-LEVEL TAB BAR ════════════════════ -->
+  <div class="tabbar">
+    <button class="tab active" data-pane="pane-market">🌊 Market</button>
+    <button class="tab" data-pane="pane-screener">🔎 Screener</button>
+    <button class="tab" data-pane="pane-registry">📋 Registry</button>
+    <button class="tab" data-pane="pane-shortlist">⭐ Shortlist</button>
+    <button class="tab" data-pane="pane-journal">📒 Journal</button>
+    <button class="tab" data-pane="pane-settings">⚙ Settings</button>
+  </div>
+
+  <!-- ════════════════════ MARKET ════════════════════ -->
+  <div id="pane-market" class="pane active">
+    <div class="h1">🌊 Market &amp; Themes</div>
+    <div class="row">
+      <button class="btn btn-primary" id="mktRefresh" style="flex:1">🔄 Refresh Market Data</button>
+    </div>
+    <div class="status" id="mktStatus"></div>
+
+    <div class="section">
+      <div class="section-hdr">🎯 Market Pulse</div>
+      <div class="idx-row" id="idxRow"></div>
+      <div id="biasPanel"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-hdr">📊 Sector Short-Term Bias</div>
+      <div id="sectorBias"><span class="cold-tag">Tap Refresh Market Data</span></div>
+    </div>
+
+    <div class="section">
+      <div class="section-hdr">🗺 Sector Heatmap</div>
+      <div class="heat-grid" id="heatGrid"></div>
+    </div>
+  </div>
+
+  <!-- ════════════════════ SCREENER ════════════════════ -->
+  <div id="pane-screener" class="pane">
+    <div class="h1">🔎 Screener</div>
+    <div class="row">
+      <button class="btn btn-primary" id="scrRunAll" style="flex:1">▶ Run all 3 screeners</button>
+    </div>
+    <div class="row" id="scrButtons"></div>
+    <div class="status" id="scrStatus"></div>
+    <div id="scrResults"></div>
+  </div>
+
+  <!-- ════════════════════ REGISTRY ════════════════════ -->
+  <div id="pane-registry" class="pane">
+    <style>
+      .reg-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+      .reg-table-wrap{overflow:auto;border:1px solid var(--border2);border-radius:8px;max-height:70vh}
+      table.reg-table{border-collapse:collapse;font-size:11px;white-space:nowrap;min-width:100%}
+      table.reg-table th{position:sticky;top:0;background:#0f172a;color:#93c5fd;text-align:left;
+        padding:6px 8px;border-bottom:1px solid var(--border2);font-weight:600;z-index:1}
+      table.reg-table td{padding:5px 8px;border-bottom:1px solid rgba(148,163,184,0.08);color:var(--txt2)}
+      table.reg-table tr.reg-live td{color:#e2e8f0}
+      table.reg-table tr.reg-live td:nth-child(2){color:#4ade80;font-weight:600}
+      table.reg-table tr.reg-today td:nth-child(2){color:#fbbf24;font-weight:600}
+      table.reg-table tr.reg-old td{color:#64748b}
+      table.reg-table tr:hover td{background:rgba(148,163,184,0.06)}
+    </style>
+    <div class="h1">📋 Candidate Registry</div>
+    <div class="set-help">Every scan writes its results here first, then the Screener cards are built from this registry — so candidates that were live earlier in the day aren't lost when a later scan no longer returns them. Each <b>ticker + day</b> is one record: a stock that reappears the same day updates its row, the same ticker on a new day starts a fresh row, and past days are kept untouched for the record.</div>
+    <div class="reg-toolbar">
+      <button class="btn btn-primary" id="regExport">⬇ Export CSV</button>
+      <button class="btn btn-ghost" id="regRefresh">🔄 Refresh table</button>
+      <button class="btn btn-ghost" id="regClear">🗑 Clear registry</button>
+    </div>
+    <div class="status" id="regSummary"></div>
+    <div class="status" id="regStatus"></div>
+    <div class="reg-table-wrap" id="regTableWrap"></div>
+  </div>
+
+  <!-- ════════════════════ SHORTLIST ════════════════════ -->
+  <div id="pane-shortlist" class="pane">
+    <div class="h1">⭐ Shortlist</div>
+    <div class="set-help">Tap <b>☆ Shortlist</b> on any Screener card to add it to <b>today's</b> list. Each trading day gets its own collapsible section — when the date rolls over, a fresh empty list starts and past days stay saved here. <b>Export</b> a day to copy its symbols (TradingView format) for Watchlist › Import, or save a <b>.txt</b>. Every export is logged below its day with the exact time.</div>
+    <div class="status" id="slStatus"></div>
+    <div id="slList"></div>
+  </div>
+
+  <!-- ════════════════════ JOURNAL ════════════════════ -->
+  <div id="pane-journal" class="pane">
+    <div class="jnl-root">
+      <div id="tab-journal" class="tab-panel" style="display:block">
+        <div class="header">
+          <h1>📒 Trade Journal</h1>
+        </div>
+        <div style="padding:12px 16px">
+
+          <div id="jnl-scope-row" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+            <span style="color:#475569;font-size:10px;font-weight:600">SCOPE</span>
+            <select id="jnl-filter-account" style="background:#0f172a;border:1px solid #1e40af;border-radius:4px;color:#93c5fd;font-size:11px;padding:4px 6px">
+              <option value="">All accounts</option>
+            </select>
+            <select id="jnl-filter-source" style="background:#0f172a;border:1px solid #1e40af;border-radius:4px;color:#93c5fd;font-size:11px;padding:4px 6px">
+              <option value="">All sources</option>
+            </select>
+          </div>
+
+          <div id="jnl-dash-tabs" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;border-bottom:1px solid #1e293b;padding-bottom:8px">
+            <button class="jnl-dash-tab" data-dash-tab="overview">Overview</button>
+            <button class="jnl-dash-tab" data-dash-tab="calendar">Calendar</button>
+            <button class="jnl-dash-tab" data-dash-tab="time">Time</button>
+            <button class="jnl-dash-tab" data-dash-tab="risk">Risk</button>
+            <button class="jnl-dash-tab" data-dash-tab="stats">Stats</button>
+            <button class="jnl-dash-tab" data-dash-tab="setups">Setups</button>
+            <button class="jnl-dash-tab" data-dash-tab="magnitude">Big W/L</button>
+            <button class="jnl-dash-tab" data-dash-tab="corr">Correlations</button>
+            <button class="jnl-dash-tab" data-dash-tab="trades">Trades</button>
+          </div>
+
+          <div id="jnl-tab-overview" class="jnl-tab-panel">
+            <div id="jnl-stats-bar" style="display:none;margin:0 0 8px;padding:8px 12px;background:#0f172a;border:1px solid #1e293b;border-radius:8px;font-size:12px;color:#94a3b8;display:flex;gap:16px;flex-wrap:wrap"></div>
+            <div id="jnl-overview-dash" style="margin-bottom:10px"></div>
+            <div id="jnl-account-stats" style="margin-bottom:10px"></div>
+          </div>
+
+          <div id="jnl-tab-calendar" class="jnl-tab-panel">
+            <div id="jnl-calendar-dash" style="margin-bottom:10px"></div>
+          </div>
+
+          <div id="jnl-tab-time" class="jnl-tab-panel">
+            <div id="jnl-time-dash" style="margin-bottom:10px"></div>
+          </div>
+
+          <div id="jnl-tab-risk" class="jnl-tab-panel">
+            <div id="jnl-risk-dash" style="margin-bottom:10px"></div>
+          </div>
+
+          <div id="jnl-tab-stats" class="jnl-tab-panel">
+            <div id="jnl-stats-catalog" style="margin-bottom:10px"></div>
+          </div>
+
+          <div id="jnl-tab-setups" class="jnl-tab-panel">
+            <div id="jnl-setup-stats" style="margin-bottom:10px"></div>
+          </div>
+
+          <div id="jnl-tab-magnitude" class="jnl-tab-panel">
+            <div id="jnl-magnitude-stats" style="margin-bottom:10px"></div>
+          </div>
+
+          <div id="jnl-tab-corr" class="jnl-tab-panel">
+            <div id="jnl-corr-stats" style="margin-bottom:10px"></div>
+          </div>
+
+          <div id="jnl-tab-trades" class="jnl-tab-panel">
+
+            <details id="jnl-import-details" open>
+              <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">Import Fills</summary>
+              <div style="margin-top:8px">
+                <div style="font-size:12px;color:#64748b;margin-bottom:6px">Import from <strong style="color:#94a3b8">TradingView</strong> (Trade Log → Export) or <strong style="color:#94a3b8">Trade the Pool / DXtrade</strong> (orders history). Tag the account, then pick the CSV file — or paste it below.</div>
+                <div style="display:flex;gap:8px;margin-bottom:6px;align-items:center;flex-wrap:wrap">
+                  <input id="jnl-account-label" placeholder="Account / broker (required)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
+                  <label class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px;cursor:pointer;padding:6px 12px;border-radius:6px;white-space:nowrap">📁 Choose CSV file<input type="file" id="jnl-file-input" accept=".csv,.txt" style="display:none"></label>
+                </div>
+                <textarea id="jnl-csv-input" placeholder="…or paste CSV here" style="width:100%;height:80px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:11px;font-family:monospace;padding:8px;resize:vertical;box-sizing:border-box"></textarea>
+                <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+                  <button id="jnl-import-btn" class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px">⬆ Import pasted</button>
+                  <button id="jnl-clear-btn" class="btn" style="background:#1e1e2e;color:#64748b;border:1px solid #334155;font-size:12px;margin-left:auto">🗑 Clear all</button>
+                </div>
+                <div id="jnl-import-msg" style="font-size:11px;margin-top:6px;min-height:16px"></div>
+              </div>
+            </details>
+
+            <details id="jnl-fees-details">
+              <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">💸 Fees &amp; Commissions</summary>
+              <div style="margin-top:8px">
+                <div style="font-size:12px;color:#64748b;margin-bottom:6px">Define the standard fee model for each account. New imports use it automatically; <strong style="color:#94a3b8">♻ Recalculate</strong> re-applies it to everything already imported.</div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+                  <select id="jnl-fee-account" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:5px 8px">
+                    <option value="*">* All accounts (default)</option>
+                  </select>
+                  <select id="jnl-fee-mode" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:5px 8px">
+                    <option value="replace">Use profile (ignore CSV commissions)</option>
+                    <option value="add">Add on top of CSV commissions</option>
+                  </select>
+                </div>
+                <div id="jnl-fee-rules"></div>
+                <div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap">
+                  <button id="jnl-fee-add-rule" class="btn" style="background:#1e1e2e;color:#94a3b8;border:1px solid #334155;font-size:12px">+ Add fee rule</button>
+                  <button id="jnl-fee-save" class="btn" style="background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af;font-size:12px">💾 Save profile</button>
+                  <button id="jnl-fee-recalc" class="btn" style="background:#14532d;color:#86efac;border:1px solid #166534;font-size:12px">♻ Recalculate all trades</button>
+                </div>
+                <div id="jnl-fee-msg" style="font-size:11px;margin-top:6px;min-height:16px"></div>
+              </div>
+            </details>
+
+            <details id="jnl-keys-details">
+              <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:12px;letter-spacing:.06em;text-transform:uppercase;padding:6px 0">📈 Chart data (optional)</summary>
+              <div style="margin-top:8px">
+                <div style="font-size:12px;color:#64748b;margin-bottom:6px">Per-trade charts use Yahoo Finance (no key, last ~7 days). For older trades, add a free <strong style="color:#94a3b8">Finnhub</strong> key (≈1 month) or a <strong style="color:#94a3b8">Polygon</strong> key.</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <input id="jnl-finnhub-key" placeholder="Finnhub API key (optional)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
+                  <input id="jnl-polygon-key" placeholder="Polygon API key (optional)" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:6px 8px;flex:1;min-width:150px;box-sizing:border-box">
+                </div>
+              </div>
+            </details>
+
+            <div id="jnl-filter-row" style="margin:8px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <input id="jnl-filter-ticker" placeholder="Filter ticker…" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:11px;padding:4px 8px;width:100px">
+              <select id="jnl-filter-side" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#94a3b8;font-size:11px;padding:4px 6px">
+                <option value="">All sides</option>
+                <option value="long">Long</option>
+                <option value="short">Short</option>
+              </select>
+              <select id="jnl-sort" style="background:#0f172a;border:1px solid #334155;border-radius:4px;color:#94a3b8;font-size:11px;padding:4px 6px">
+                <option value="date-desc">Newest first</option>
+                <option value="date-asc">Oldest first</option>
+                <option value="pnl-desc">Best P&amp;L first</option>
+                <option value="pnl-asc">Worst P&amp;L first</option>
+              </select>
+              <button id="jnl-export-records-btn" class="btn" style="background:#1e1e2e;color:#94a3b8;border:1px solid #334155;font-size:11px;margin-left:auto">⬇ Export Records CSV</button>
+            </div>
+
+            <div id="jnl-cards-container"></div>
+          </div><!-- /jnl-tab-trades -->
+
+        </div><!-- /padding -->
+
+        <!-- Per-trade chart modal (z-index 9999 floats above everything) -->
+        <div id="jnl-chart-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.82);align-items:flex-start;justify-content:center;padding:8px;overflow-y:auto">
+          <div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;width:100%;max-width:780px;display:flex;flex-direction:column;overflow:hidden;margin:auto">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #1e293b;gap:8px;flex-wrap:wrap">
+              <div id="jnl-chart-title" style="font-size:13px;font-weight:700;color:#e2e8f0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+              <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+                <button id="jnl-chart-1m" class="btn jnl-res-btn" data-res="1" style="font-size:11px;padding:3px 10px;background:#1e3a5f;color:#93c5fd;border:1px solid #1e40af">1m</button>
+                <button id="jnl-chart-5m" class="btn jnl-res-btn" data-res="5" style="font-size:11px;padding:3px 10px;background:#1e1e2e;color:#64748b;border:1px solid #334155">5m</button>
+                <button id="jnl-chart-close" style="background:#1e293b;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font-size:15px;cursor:pointer;padding:3px 10px;line-height:1">✕ Close</button>
+              </div>
+            </div>
+            <div id="jnl-chart-status" style="font-size:11px;color:#64748b;padding:4px 12px;min-height:18px"></div>
+            <div id="jnl-fullsig-banner" style="padding:0 12px"></div>
+            <div style="font-size:10px;color:#64748b;padding:0 12px 6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <span>Checklist computed at:</span>
+              <button class="btn jnl-chktf-btn" data-chktf="1" style="font-size:10px;padding:2px 8px;background:#1e1e2e;color:#64748b;border:1px solid #334155">1m</button>
+              <button class="btn jnl-chktf-btn" data-chktf="5" style="font-size:10px;padding:2px 8px;background:#3b2f1e;color:#fbbf24;border:1px solid #b45309">5m</button>
+              <span style="color:#475569">— same TF for every trade so MAs/BB compare like-for-like</span>
+            </div>
+            <div id="jnl-chart-container" style="width:100%;height:340px;position:relative"></div>
+            <div id="jnl-vol-container" style="width:100%;height:70px;position:relative"></div>
+            <div style="padding:8px 12px;border-top:1px solid #1e293b;text-align:center">
+              <button id="jnl-chart-close-bottom" style="background:#1e293b;border:1px solid #334155;border-radius:6px;color:#94a3b8;font-size:12px;cursor:pointer;padding:6px 32px">✕ Close chart</button>
+            </div>
+          </div>
+        </div><!-- /jnl-chart-modal -->
+
+      </div><!-- /tab-journal -->
+    </div><!-- /jnl-root -->
+  </div><!-- /pane-journal -->
+
+  <!-- ════════════════════ SETTINGS ════════════════════ -->
+  <div id="pane-settings" class="pane">
+    <div class="h1">⚙ Settings</div>
+
+    <div class="section">
+      <div class="section-hdr">🔥 Hot Sector Thresholds</div>
+      <div class="set-help">A sector turns <b>🔥 HOT</b> when its score reaches the <b>immediate</b> threshold instantly, or holds at/above the <b>sustained</b> threshold for the set number of <b>sessions</b> (one session = one trading day you refresh). Once hot, it <b>stays hot</b> as long as its score holds above the <b>floor</b> — it only cools off after sitting <b>below the floor for more than</b> the set number of cooling sessions. So a normal pullback won't un-hot a leader; only a real breakdown will.</div>
+      <div class="set-field"><label>Immediate threshold — instant HOT (default 80)</label><input id="setHotImm" type="number" min="0" max="100" step="1"></div>
+      <div class="set-field"><label>Sustained threshold (default 65)</label><input id="setHotSus" type="number" min="0" max="100" step="1"></div>
+      <div class="set-field"><label>Sustained sessions to enter HOT (default 2)</label><input id="setHotDays" type="number" min="1" max="14" step="1"></div>
+      <div class="set-field"><label>Stay-hot floor — stays HOT while score ≥ this (default 40)</label><input id="setHotFloor" type="number" min="0" max="100" step="1"></div>
+      <div class="set-field"><label>Cooling sessions — drop HOT after below the floor for more than this (default 2)</label><input id="setHotCool" type="number" min="1" max="14" step="1"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-hdr">📰 News — Finnhub API Key</div>
+      <div class="set-help">Used to pull company-news <b>summaries</b> onto screener cards. Grab a free key at finnhub.io (60 calls/min on the free tier). TradingView headlines are fetched without a key on a best-effort basis (unofficial endpoint, titles + links only). News loads per-card on demand to stay within the rate limit.</div>
+      <div class="set-toggle"><label><input id="setFinnhubNews" type="checkbox"> Include Finnhub news on cards (in addition to TradingView)</label></div>
+      <div class="set-field"><label>Finnhub API key</label><input id="setFinnhub" type="password" placeholder="paste key…" autocomplete="off" spellcheck="false"></div>
+    </div>
+
+    <div class="row">
+      <button class="btn btn-primary" id="setSave">💾 Save</button>
+      <button class="btn" id="setReset">↩ Reset thresholds</button>
+      <button class="btn btn-ghost" id="setClearHist">🗑 Clear hot history</button>
+    </div>
+    <div class="status" id="setStatus"></div>
+  </div>
+
+  <!-- ════════════════════ CHART MODAL (Market / Screener) ════════════════════ -->
+  <div class="chart-overlay" id="chartOverlay">
+    <div class="chart-modal">
+      <div class="chart-bar">
+        <span class="chart-title" id="chartTitle">📈 —</span>
+        <span class="chart-spacer"></span>
+        <span class="chart-rng">
+          <button id="chartRange3M">3M</button>
+          <button id="chartRange6M" class="on">6M</button>
+        </span>
+        <button class="chart-x" id="chartClose">✕ Close</button>
+      </div>
+      <div class="chart-sub" id="chartSub"></div>
+      <div class="chart-host" id="chartHost">
+        <div class="chart-note" id="chartNote">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="lightweight-charts.standalone.production.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
