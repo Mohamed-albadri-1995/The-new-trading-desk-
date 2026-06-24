@@ -1006,10 +1006,11 @@ function fetchBySymbols(tvSymbols) {
 function fetchYahooShort(tickers) {
   if (!tickers || !tickers.length) return Promise.resolve({});
   var results = {};
-  // v7/finance/quote: one batch request, no auth required, same host as background.js
+  // v7/finance/quote: one batch request — credentials:include sends Yahoo session
+  // cookies from the user's browser so the API returns fundamental fields
   var url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
             tickers.map(encodeURIComponent).join(',');
-  return fetch(url)
+  return fetch(url, { credentials: 'include' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (data) {
       var items = data && data.quoteResponse && data.quoteResponse.result;
