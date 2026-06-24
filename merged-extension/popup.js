@@ -754,10 +754,49 @@ function renderBiasPanel() {
       (ex && body ? '<div class="bias-body">' + body + '</div>' : '') + '</div>';
   }
 
+  function shortDetail() {
+    var ix = marketCtx.indices || {};
+    if (!ix.SPY && !ix.QQQ) return '<div class="sig-note">Refresh market data to compute signals.</div>';
+    var sigs = [];
+    function addIdx(sym, key, upThr, dnThr, label) {
+      var d = ix[key]; if (!d) return;
+      var v = d.change; if (v == null) return;
+      var state = v > upThr ? 'bull' : v < dnThr ? 'bear' : 'neu';
+      sigs.push({ label: label, value: (v >= 0 ? '+' : '') + v.toFixed(2) + '% day', state: state, tf: 'D' });
+    }
+    function addVix() {
+      var d = ix.VIX; if (!d || d.change == null) return;
+      var v = d.change;
+      var state = v > 3 ? 'bear' : v > 1 ? 'bear' : v < -2 ? 'bull' : 'neu';
+      sigs.push({ label: 'VIX change', value: (v >= 0 ? '+' : '') + v.toFixed(2) + '%', state: state, tf: 'D' });
+    }
+    function addWeek(sym, key, label) {
+      var d = ix[key]; if (!d || d.weekChg == null) return;
+      var v = d.weekChg;
+      var state = v > 1 ? 'bull' : v < -1 ? 'bear' : 'neu';
+      sigs.push({ label: label, value: (v >= 0 ? '+' : '') + v.toFixed(2) + '% week', state: state, tf: 'W' });
+    }
+    addIdx('SPY', 'SPY', 0.3, -0.3, 'SPY day');
+    addIdx('QQQ', 'QQQ', 0.3, -0.3, 'QQQ day');
+    addIdx('IWM', 'IWM', 0.3, -0.3, 'IWM day');
+    addVix();
+    addWeek('SPY', 'SPY', 'SPY week');
+    addWeek('QQQ', 'QQQ', 'QQQ week');
+    var bull = sigs.filter(function (s) { return s.state === 'bull'; }).length;
+    var bear = sigs.filter(function (s) { return s.state === 'bear'; }).length;
+    var h = '<div class="sig-note" style="margin-bottom:6px">Score: +' + bull + ' bull / -' + bear + ' bear → ' + (st) + '</div>';
+    h += '<div class="sig-grid"><div class="sig-hdr"><span>Signal</span><span>Value</span><span>TF</span></div>';
+    sigs.forEach(function (s) {
+      var c = s.state === 'bull' ? 'sb' : s.state === 'bear' ? 'se' : 'sn';
+      h += '<div class="sig-r ' + c + '"><span>' + esc(s.label) + '</span><span>' + esc(s.value) + '</span><span>' + s.tf + '</span></div>';
+    });
+    return h + '</div>';
+  }
+
   var refreshStr = marketCtx.lastRefresh ? 'Refreshed ' + fmtETTime(marketCtx.lastRefresh) + ' ET' : 'Not yet loaded';
   host.className = 'bias-panel';
   host.innerHTML = regimeHtml +
-    row('short', 'SHORT-TERM (Today)', st, rowCls(st), stIcon, '', '', '', 'short') +
+    row('short', 'SHORT-TERM (Today)', st, rowCls(st), stIcon, '', '', shortDetail(), 'short') +
     row('mid', 'MID-TERM (Trend)', marketCtx.marketStage, rowCls(marketCtx.marketStage), (midData && midData.stage !== 'UNKNOWN' ? '📊' : '⚪'), bbChip, (midData && midData.stageLabel) || '', sigDetail(), 'mid') +
     row('long', 'LONG-TERM (200DMA)', lt, rowCls(lt), (lt !== 'UNKNOWN' ? '📈' : '⚪'), ltChip, (ltData && ltData.label) || '', (ltData ? '<div class="sig-note">' + esc(ltData.label) + '</div>' : ''), 'long') +
     '<div class="bias-foot">' + refreshStr + '</div>';
