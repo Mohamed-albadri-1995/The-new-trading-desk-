@@ -141,7 +141,7 @@ var TV_COLUMNS = [
   'ticker-view', 'open', 'close', 'change', 'relative_volume_10d_calc',
   'relative_volume_intraday|5', 'market_cap_basic', 'sector', 'industry',
   'change_from_open', 'VWAP',
-  'High.1M', 'Low.1M', 'high', 'low', 'ATR',
+  'High.1M', 'Low.1M', 'premarket_high', 'premarket_low', 'ATR',
   'short_percentage_of_float', 'float_shares_outstanding',
   'EMA9', 'EMA13', 'EMA20', 'EMA50', 'SMA5'
 ];
@@ -959,7 +959,7 @@ function mapTvRowToStock(item, screenerKey) {
     ema9: num(r['EMA9']), ema13: num(r['EMA13']), ema20: num(r['EMA20']), ema50: num(r['EMA50']),
     sma5: num(r['SMA5']),
     monthHigh: num(r['High.1M']), monthLow: num(r['Low.1M']),
-    dayHigh: num(r['high']), dayLow: num(r['low']), atr: num(r['ATR']),
+    pmHigh: num(r['premarket_high']), pmLow: num(r['premarket_low']), atr: num(r['ATR']),
     mcap: num(r['market_cap_basic']),
     floatShares: num(r['float_shares_outstanding']),
     shortFloat: num(r['short_percentage_of_float']),
@@ -1164,20 +1164,18 @@ function buildCard(row) {
     var rc = s.rvol >= 3 ? 'pos' : s.rvol >= 1.5 ? '' : 'neg';
     L.push('<div class="line"><b>RVOL:</b> <span class="' + rc + '">' + s.rvol.toFixed(1) + 'x</span></div>');
   }
-  // Move (× ATR)
-  if (s.dayHigh != null && s.dayLow != null && s.atr != null && s.atr > 0) {
-    if (s.price != null && s.atr > s.price * 1.5) {
-      L.push('<div class="line"><b>Move:</b> <span class="sub9">— (ATR-14 unreliable)</span></div>');
-    } else {
-      var ranges = [s.dayHigh - s.dayLow];
-      if (s.prevClose != null) { ranges.push(Math.abs(s.dayHigh - s.prevClose)); ranges.push(Math.abs(s.dayLow - s.prevClose)); }
-      var mv = Math.max.apply(null, ranges) / s.atr;
-      if (isFinite(mv)) {
-        var mc = mv >= 3 ? 'neg' : mv >= 1 ? 'pos' : '';
-        var mn = mv >= 3 ? ' (overextended)' : mv >= 1 ? ' (above avg day)' : mv < 0.5 ? ' (quiet)' : '';
-        L.push('<div class="line"><b>Move:</b> <span class="' + mc + '">' + mv.toFixed(2) + '× ATR</span><span class="sub9">' + mn + '</span></div>');
+  // Pre-market range (× ATR)
+  if (s.pmHigh != null && s.pmLow != null) {
+    var pmR = '<b>PM range:</b> H $' + s.pmHigh.toFixed(2) + ' · L $' + s.pmLow.toFixed(2);
+    if (s.atr != null && s.atr > 0 && !(s.atr > s.price * 1.5)) {
+      var pmMv = (s.pmHigh - s.pmLow) / s.atr;
+      if (isFinite(pmMv)) {
+        var pmc = pmMv >= 2 ? 'neg' : pmMv >= 0.5 ? 'pos' : '';
+        var pmn = pmMv >= 2 ? ' (wide — vol)' : pmMv >= 0.5 ? ' (active PM)' : ' (quiet PM)';
+        pmR += ' <span class="' + pmc + '">(' + pmMv.toFixed(2) + '× ATR' + pmn + ')</span>';
       }
     }
+    L.push('<div class="line">' + pmR + '</div>');
   }
 
   var badges = (matchedKeys || [s.screenerKey]).map(function (k) { return '<span class="scr-badge">' + esc(SCREENERS[k].short) + '</span>'; }).join('');
@@ -1447,8 +1445,8 @@ var REG_COLUMNS = [
   { label: 'VWAP', get: function (r) { return regFix(r.stock.vwap); } },
   { label: 'RVOL', get: function (r) { return regFix(r.stock.rvol); } },
   { label: 'ATR', get: function (r) { return regFix(r.stock.atr); } },
-  { label: 'Day H', get: function (r) { return regFix(r.stock.dayHigh); } },
-  { label: 'Day L', get: function (r) { return regFix(r.stock.dayLow); } },
+  { label: 'PM High', get: function (r) { return regFix(r.stock.pmHigh); } },
+  { label: 'PM Low', get: function (r) { return regFix(r.stock.pmLow); } },
   { label: '1M H', get: function (r) { return regFix(r.stock.monthHigh); } },
   { label: '1M L', get: function (r) { return regFix(r.stock.monthLow); } },
   { label: 'Mkt cap', get: function (r) { return regFix(r.stock.mcap, 0); } },
