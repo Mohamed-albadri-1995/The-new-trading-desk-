@@ -144,7 +144,7 @@ var TV_COLUMNS = [
   'relative_volume_intraday|5', 'market_cap_basic', 'sector', 'industry',
   'change_from_open', 'VWAP',
   'High.1M', 'Low.1M', 'premarket_high', 'premarket_low', 'ATR',
-  'short_ratio', 'float_shares_outstanding',
+  'short_ratio', 'float_shares_outstanding', 'average_volume_10d_calc',
   'EMA9', 'EMA13', 'EMA20', 'EMA50', 'SMA5'
 ];
 
@@ -965,6 +965,10 @@ function mapTvRowToStock(item, screenerKey) {
     mcap: num(r['market_cap_basic']),
     floatShares: num(r['float_shares_outstanding']),
     shortRatio: num(r['short_ratio']),
+    shortFloat: (function () {
+      var sr = num(r['short_ratio']), av = num(r['average_volume_10d_calc']), fl = num(r['float_shares_outstanding']);
+      return (sr != null && av != null && fl != null && fl > 0) ? sr * av / fl * 100 : null;
+    }()),
     rvol: num(r['relative_volume_intraday|5']) || num(r['relative_volume_10d_calc']),
     sector: r['sector'] || '', industry: r['industry'] || ''
   };
@@ -1166,11 +1170,20 @@ function buildCard(row) {
     var ft = s.floatShares < 1e7 ? ' <span class="sub9" style="color:var(--amber)">⚠ low float</span>' : s.floatShares < 5e7 ? ' <span class="sub9" style="color:var(--amber2)">small float</span>' : '';
     L.push('<div class="line"><b>Float:</b> ' + fmtVolShort(s.floatShares) + ' sh' + ft + '</div>');
   }
-  // Short ratio (days to cover)
-  if (s.shortRatio != null) {
-    var sc = s.shortRatio >= 10 ? 'var(--amber)' : s.shortRatio >= 5 ? 'var(--amber2)' : 'var(--txt2)';
-    var sn = s.shortRatio >= 10 ? ' <span class="sub9" style="color:var(--amber)">⚠ squeeze risk</span>' : s.shortRatio >= 5 ? ' <span class="sub9">elevated</span>' : '';
-    L.push('<div class="line"><b>Short ratio:</b> <span style="color:' + sc + '">' + s.shortRatio.toFixed(1) + ' days</span>' + sn + '</div>');
+  // Short float % (derived) + short ratio (days to cover)
+  if (s.shortFloat != null || s.shortRatio != null) {
+    var sfLine = '<b>Short float:</b> ';
+    if (s.shortFloat != null) {
+      var sfc = s.shortFloat >= 20 ? 'var(--amber)' : s.shortFloat >= 10 ? 'var(--amber2)' : 'var(--txt2)';
+      var sfn = s.shortFloat >= 20 ? ' <span class="sub9" style="color:var(--amber)">⚠ squeeze risk</span>' : '';
+      sfLine += '<span style="color:' + sfc + '">' + s.shortFloat.toFixed(1) + '%</span>' + sfn;
+    } else {
+      sfLine += '<span class="sub9">n/a</span>';
+    }
+    if (s.shortRatio != null) {
+      sfLine += ' <span class="sub9">· ' + s.shortRatio.toFixed(1) + ' days to cover</span>';
+    }
+    L.push('<div class="line">' + sfLine + '</div>');
   }
   // RVOL
   if (s.rvol != null && s.rvol > 0) {
@@ -1368,7 +1381,7 @@ var SNAP_COLUMNS = [
   // ── Fundamentals ─────────────────────────────────────────────
   { n: 44, label: 'Mkt Cap',        k: 'mcap', fmt: 0 },
   { n: 45, label: 'Float',          k: 'floatShares', fmt: 0 },
-  { n: 46, label: 'Short Ratio',    k: 'shortRatio', fmt: 1 },
+  { n: 46, label: 'Short Float %',  k: 'shortFloat', fmt: 1 },
   // ── Registry meta ────────────────────────────────────────────
   { n: 47, label: 'News count',     k: 'newsCount', fmt: 0 },
   { n: 48, label: 'Screeners',      k: 'screenerKeys' },
@@ -1550,7 +1563,7 @@ async function buildSnapshotRegistry(snapshotTime) {
         // monthly range
         monthHigh: mh, monthLow: ml, mPos: mPos, mFromH: mFromH, mFromL: mFromL,
         // fundamentals
-        mcap: s.mcap, floatShares: s.floatShares, shortRatio: s.shortRatio,
+        mcap: s.mcap, floatShares: s.floatShares, shortFloat: s.shortFloat,
         // meta
         newsCount: newsCount,
         screenerKeys: (regRow.screenerKeys || []).map(function (k) { return SCREENERS[k] ? SCREENERS[k].short : k; }).join(', '),
@@ -1817,6 +1830,7 @@ var REG_COLUMNS = [
   { label: 'Mkt cap', get: function (r) { return regFix(r.stock.mcap, 0); } },
   { label: 'Float', get: function (r) { return regFix(r.stock.floatShares, 0); } },
   { label: 'Short ratio', get: function (r) { return regFix(r.stock.shortRatio); } },
+  { label: 'Short Float %', get: function (r) { return regFix(r.stock.shortFloat); } },
   { label: 'EMA9', get: function (r) { return regFix(r.stock.ema9); } },
   { label: 'EMA13', get: function (r) { return regFix(r.stock.ema13); } },
   { label: 'EMA20', get: function (r) { return regFix(r.stock.ema20); } },

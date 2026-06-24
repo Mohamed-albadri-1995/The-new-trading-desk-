@@ -287,7 +287,7 @@ async function fetchAlpacaBars(ticker, dateStr, alpacaKey, alpacaSecret) {
   var tz = etOffsetStr(dateStr);
   var tzH = tz === '-04:00' ? -4 : -5;
   var start = dateStr + 'T09:20:00' + tz;
-  var end   = dateStr + 'T20:10:00' + tz;
+  var end   = dateStr + 'T16:05:00' + tz;
   var baseUrl = 'https://data.alpaca.markets/v2/stocks/' +
     encodeURIComponent(ticker.toUpperCase()) + '/bars' +
     '?timeframe=1Min&start=' + encodeURIComponent(start) +
