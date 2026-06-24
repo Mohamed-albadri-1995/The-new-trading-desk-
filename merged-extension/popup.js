@@ -1595,10 +1595,7 @@ function calcIndicatorsFromBars(allDailyBars, snapDate, intradayBars, snapTime) 
   var prevClose = histBars[histBars.length - 1].c;
   var open = null;
   if (intradayBars && intradayBars.length) {
-    for (var i = 0; i < intradayBars.length; i++) {
-      if (intradayBars[i].etTime >= '09:30') { open = intradayBars[i].o; break; }
-    }
-    if (open == null) open = intradayBars[0].o;
+    open = intradayBars[0].o;
   }
   if (open == null && snapDayBar) open = snapDayBar.o;
   var gapPct = (open != null && prevClose > 0) ? (open - prevClose) / prevClose * 100 : null;
@@ -1673,9 +1670,9 @@ async function fetchIdxSnap(snapDate, snapTime) {
   var cacheKey = snapDate + '|' + snapTime;
   if (_idxCache[cacheKey]) return _idxCache[cacheKey];
   var results = await Promise.all([
-    fetchIntradayBars('SPY', snapDate).catch(function () { return []; }),
-    fetchIntradayBars('QQQ', snapDate).catch(function () { return []; }),
-    fetchIntradayBars('IWM', snapDate).catch(function () { return []; }),
+    fetchIntradayBars('SPY', snapDate, '09:30:00').catch(function () { return []; }),
+    fetchIntradayBars('QQQ', snapDate, '09:30:00').catch(function () { return []; }),
+    fetchIntradayBars('IWM', snapDate, '09:30:00').catch(function () { return []; }),
     fetchDailyBars('SPY', snapDate, 220).catch(function () { return []; }),
     fetchDailyBars('QQQ', snapDate, 50).catch(function () { return []; }),
     fetchDailyBars('IWM', snapDate, 50).catch(function () { return []; }),
@@ -1768,7 +1765,7 @@ async function buildSnapshotRegistry(snapshotTime) {
     var ctx = regRow.context || {};
     try {
       var fetched = await Promise.all([
-        fetchIntradayBars(ticker, today),
+        fetchIntradayBars(ticker, today, '09:30:00'),
         fetchDailyBars(ticker, today, 220).catch(function () { return []; }),
         fetchIntradayBars(ticker, today, '04:00:00', '09:29:00').catch(function () { return []; })
       ]);
