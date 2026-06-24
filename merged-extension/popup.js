@@ -1006,28 +1006,25 @@ function fetchBySymbols(tvSymbols) {
 function fetchYahooShort(tickers) {
   if (!tickers || !tickers.length) return Promise.resolve({});
   var results = {};
-  return Promise.all(tickers.map(function (ticker) {
-    var url = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary/' +
-              encodeURIComponent(ticker) +
-              '?modules=defaultKeyStatistics&formatted=false&corsDomain=finance.yahoo.com';
-    return fetch(url, { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (data) {
-        var ks = data &&
-                 data.quoteSummary &&
-                 data.quoteSummary.result &&
-                 data.quoteSummary.result[0] &&
-                 data.quoteSummary.result[0].defaultKeyStatistics;
-        if (!ks) return;
-        // shortPercentOfFloat comes as a ratio (0.04 = 4 %)
-        var sf = (ks.shortPercentOfFloat != null && ks.shortPercentOfFloat > 0)
-          ? ks.shortPercentOfFloat * 100 : null;
-        var sr = (ks.shortRatio != null && ks.shortRatio > 0)
-          ? ks.shortRatio : null;
-        if (sf != null || sr != null) results[ticker] = { shortFloat: sf, shortRatio: sr };
-      })
-      .catch(function () {});
-  })).then(function () { return results; });
+  // v7/finance/quote: one batch request, no auth required, same host as background.js
+  var url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
+            tickers.map(encodeURIComponent).join(',');
+  return fetch(url)
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      var items = data && data.quoteResponse && data.quoteResponse.result;
+      if (!items) return results;
+      items.forEach(function (item) {
+        // shortPercentOfFloat comes as a ratio (0.04 = 4%)
+        var sf = (item.shortPercentOfFloat != null && item.shortPercentOfFloat > 0)
+          ? item.shortPercentOfFloat * 100 : null;
+        var sr = (item.shortRatio != null && item.shortRatio > 0)
+          ? item.shortRatio : null;
+        if (sf != null || sr != null) results[item.symbol] = { shortFloat: sf, shortRatio: sr };
+      });
+      return results;
+    })
+    .catch(function () { return results; });
 }
 
 // Apply a Yahoo short-data map to a list of registry rows.
