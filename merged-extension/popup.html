@@ -381,6 +381,7 @@
   <div class="tabbar">
     <button class="tab active" data-pane="pane-market">🌊 Market</button>
     <button class="tab" data-pane="pane-screener">🔎 Screener</button>
+    <button class="tab" data-pane="pane-registry">📋 Registry</button>
     <button class="tab" data-pane="pane-shortlist">⭐ Shortlist</button>
     <button class="tab" data-pane="pane-journal">📒 Journal</button>
     <button class="tab" data-pane="pane-settings">⚙ Settings</button>
@@ -420,6 +421,33 @@
     <div class="row" id="scrButtons"></div>
     <div class="status" id="scrStatus"></div>
     <div id="scrResults"></div>
+  </div>
+
+  <!-- ════════════════════ REGISTRY ════════════════════ -->
+  <div id="pane-registry" class="pane">
+    <style>
+      .reg-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+      .reg-table-wrap{overflow:auto;border:1px solid var(--border2);border-radius:8px;max-height:70vh}
+      table.reg-table{border-collapse:collapse;font-size:11px;white-space:nowrap;min-width:100%}
+      table.reg-table th{position:sticky;top:0;background:#0f172a;color:#93c5fd;text-align:left;
+        padding:6px 8px;border-bottom:1px solid var(--border2);font-weight:600;z-index:1}
+      table.reg-table td{padding:5px 8px;border-bottom:1px solid rgba(148,163,184,0.08);color:var(--txt2)}
+      table.reg-table tr.reg-live td{color:#e2e8f0}
+      table.reg-table tr.reg-live td:nth-child(2){color:#4ade80;font-weight:600}
+      table.reg-table tr.reg-today td:nth-child(2){color:#fbbf24;font-weight:600}
+      table.reg-table tr.reg-old td{color:#64748b}
+      table.reg-table tr:hover td{background:rgba(148,163,184,0.06)}
+    </style>
+    <div class="h1">📋 Candidate Registry</div>
+    <div class="set-help">Every scan writes its results here first, then the Screener cards are built from this registry — so candidates that were live earlier in the day aren't lost when a later scan no longer returns them. Each <b>ticker + day</b> is one record: a stock that reappears the same day updates its row, the same ticker on a new day starts a fresh row, and past days are kept untouched for the record.</div>
+    <div class="reg-toolbar">
+      <button class="btn btn-primary" id="regExport">⬇ Export CSV</button>
+      <button class="btn btn-ghost" id="regRefresh">🔄 Refresh table</button>
+      <button class="btn btn-ghost" id="regClear">🗑 Clear registry</button>
+    </div>
+    <div class="status" id="regSummary"></div>
+    <div class="status" id="regStatus"></div>
+    <div class="reg-table-wrap" id="regTableWrap"></div>
   </div>
 
   <!-- ════════════════════ SHORTLIST ════════════════════ -->

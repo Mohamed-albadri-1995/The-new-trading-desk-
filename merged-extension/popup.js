@@ -902,6 +902,34 @@ async function refreshMarket() {
 // ══════════════════════════════════════════════════════════════════════
 // SCREENER TAB
 // ══════════════════════════════════════════════════════════════════════
+// Map one TradingView scanner row (item.d[] in TV_COLUMNS order) to the rich
+// stock object the cards + registry consume. Shared by the filter-based
+// screeners and the symbol-based refresh of earlier candidates.
+function mapTvRowToStock(item, screenerKey) {
+  var r = rowObj(item, TV_COLUMNS);
+  var tv = r['ticker-view'], t = '';
+  if (tv && typeof tv === 'object' && tv.symbol) t = tv.symbol; else if (typeof tv === 'string') t = tv; else t = String(item.s || '');
+  t = t.replace(/^.*:/, '').trim();
+  var close = num(r['close']), change = num(r['change']);
+  var cfo = num(r['change_from_open']);
+  return {
+    ticker: t, screenerKey: screenerKey || null, tvSymbol: String(item.s || ''),
+    price: close, open: num(r['open']), change: change,
+    prevClose: (close != null && change != null && (1 + change / 100) !== 0) ? close / (1 + change / 100) : null,
+    gapPct: (change != null && cfo != null) ? (change - cfo) : null,
+    vwap: num(r['VWAP']),
+    ema9: num(r['EMA9']), ema13: num(r['EMA13']), ema20: num(r['EMA20']), ema50: num(r['EMA50']),
+    sma5: num(r['SMA5']),
+    monthHigh: num(r['High.1M']), monthLow: num(r['Low.1M']),
+    dayHigh: num(r['high']), dayLow: num(r['low']), atr: num(r['ATR']),
+    mcap: num(r['market_cap_basic']),
+    floatShares: num(r['float_shares_outstanding']),
+    shortFloat: num(r['short_percentage_of_float']),
+    rvol: num(r['relative_volume_intraday|5']) || num(r['relative_volume_10d_calc']),
+    sector: r['sector'] || '', industry: r['industry'] || ''
+  };
+}
+
 function runScreener(key) {
   var cfg = SCREENERS[key];
   var body = {
@@ -910,30 +938,21 @@ function runScreener(key) {
     range: [0, 50], sort: cfg.sort, symbols: {}
   };
   return tvScan(body).then(function (data) {
-    return (data.data || []).map(function (item) {
-      var r = rowObj(item, TV_COLUMNS);
-      var tv = r['ticker-view'], t = '';
-      if (tv && typeof tv === 'object' && tv.symbol) t = tv.symbol; else if (typeof tv === 'string') t = tv; else t = String(item.s || '');
-      t = t.replace(/^.*:/, '').trim();
-      var close = num(r['close']), change = num(r['change']);
-      var cfo = num(r['change_from_open']);
-      return {
-        ticker: t, screenerKey: key, tvSymbol: String(item.s || ''),
-        price: close, open: num(r['open']), change: change,
-        prevClose: (close != null && change != null && (1 + change / 100) !== 0) ? close / (1 + change / 100) : null,
-        gapPct: (change != null && cfo != null) ? (change - cfo) : null,
-        vwap: num(r['VWAP']),
-        ema9: num(r['EMA9']), ema13: num(r['EMA13']), ema20: num(r['EMA20']), ema50: num(r['EMA50']),
-        sma5: num(r['SMA5']),
-        monthHigh: num(r['High.1M']), monthLow: num(r['Low.1M']),
-        dayHigh: num(r['high']), dayLow: num(r['low']), atr: num(r['ATR']),
-        mcap: num(r['market_cap_basic']),
-        floatShares: num(r['float_shares_outstanding']),
-        shortFloat: num(r['short_percentage_of_float']),
-        rvol: num(r['relative_volume_intraday|5']) || num(r['relative_volume_10d_calc']),
-        sector: r['sector'] || '', industry: r['industry'] || ''
-      };
-    }).filter(function (s) { return s.ticker; });
+    return (data.data || []).map(function (item) { return mapTvRowToStock(item, key); })
+      .filter(function (s) { return s.ticker; });
+  });
+}
+
+// Fetch current quote data for an explicit list of TradingView symbols
+// ("EXCHANGE:TICKER"), bypassing the screener filters. Used to refresh
+// candidates that appeared earlier today but aren't in the latest live scan.
+function fetchBySymbols(tvSymbols) {
+  tvSymbols = (tvSymbols || []).filter(Boolean);
+  if (!tvSymbols.length) return Promise.resolve([]);
+  var body = { symbols: { tickers: tvSymbols }, columns: TV_COLUMNS, options: { lang: 'en' } };
+  return tvScan(body).then(function (data) {
+    return (data.data || []).map(function (item) { return mapTvRowToStock(item, null); })
+      .filter(function (s) { return s.ticker; });
   });
 }
 
@@ -970,7 +989,7 @@ function loadCardNews(ticker, tvSymbol, hostId) {
     .catch(function (e) { host.innerHTML = '<span class="sub9">News unavailable: ' + esc(e.message) + '</span>'; });
 }
 
-function buildCard(s, matchedKeys) {
+function buildCard(s, matchedKeys, regMeta) {
   scrIndex[s.ticker] = s;
   var L = [];
   // Price · Open · Prev close
@@ -1114,12 +1133,23 @@ function buildCard(s, matchedKeys) {
   var starBtn = '<button class="sl-star' + (inList ? ' on' : '') + '" data-sl-add="' + esc(s.ticker) + '">' +
     (inList ? '★ In list' : '☆ Shortlist') + '</button>';
 
+  // Registry status line — present only when the card is built from a registry
+  // row (the standard path). Shows whether the stock is live in the latest
+  // scan or was surfaced earlier today and has since been refreshed.
+  var regStatus = '';
+  if (regMeta) {
+    regStatus = regMeta.liveNow
+      ? '<div style="font-size:10px;font-weight:600;color:#4ade80;margin:0 0 4px">● Live now · updated ' + esc(fmtETTime(regMeta.lastUpdated)) + ' ET</div>'
+      : '<div style="font-size:10px;font-weight:600;color:#fbbf24;margin:0 0 4px">○ Seen earlier today · refreshed ' + esc(fmtETTime(regMeta.lastUpdated)) + ' ET</div>';
+  }
+
   return '<div class="scr-card">' +
     '<div class="scr-hdr"><span class="scr-ticker tap" data-chart="' + esc(s.ticker) + '">' + esc(s.ticker) + '</span>' +
     (s.change != null ? '<span class="scr-chg ' + chgCls + '">' + (s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%</span>' : '') +
     '<span class="scr-badges">' + badges + '</span>' + starBtn +
     (s.sector ? '<span class="scr-sector">' + esc(s.sector) + (s.industry ? ' · ' + esc(s.industry) : '') + '</span>' : '') +
     '</div>' +
+    regStatus +
     ctxHtml +
     '<div class="tech-hdr">📈 TECHNICALS</div>' +
     (L.length ? L.join('') : '<div class="empty">— no technical data —</div>') +
@@ -1127,12 +1157,112 @@ function buildCard(s, matchedKeys) {
     '</div>';
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// CANDIDATE REGISTRY — durable record of every stock a scan surfaces.
+// Cards are ALWAYS built from this registry (never directly from a live
+// scan) so candidates that appeared earlier in the day aren't lost when a
+// later scan no longer returns them. Unique id = TICKER|YYYY-MM-DD (ET):
+// the same ticker on a different day is a distinct record.
+//
+//   row = {
+//     id, ticker, date, tvSymbol,
+//     firstSeen, lastUpdated, liveNow,   // liveNow = matched the latest full scan
+//     screenerKeys: [..],                // screeners it has matched today (union)
+//     stock: { ...full mapped quote... } // what buildCard / the table consume
+//   }
+// ══════════════════════════════════════════════════════════════════════
+var registry = {};   // id -> row
+
+function loadRegistry() {
+  return storageGet(['registry']).then(function (r) { registry = r.registry || {}; return registry; });
+}
+function saveRegistry() { return storageSet({ registry: registry }); }
+function regId(ticker, date) { return ticker + '|' + date; }
+function regTodayRows() {
+  var today = etDateStr();
+  return Object.keys(registry).map(function (k) { return registry[k]; })
+    .filter(function (row) { return row.date === today; });
+}
+
+// Add/update today's rows for the stocks that are live in this scan.
+// keysByTicker: { TICKER -> [screenerKeys matched this scan] }.
+function registryUpsertLive(stocks, keysByTicker) {
+  var today = etDateStr(), now = Date.now();
+  stocks.forEach(function (s) {
+    var id = regId(s.ticker, today);
+    var keys = keysByTicker[s.ticker] || (s.screenerKey ? [s.screenerKey] : []);
+    var row = registry[id];
+    if (row) {                              // seen earlier today → update in place
+      row.stock = s;
+      row.tvSymbol = s.tvSymbol || row.tvSymbol;
+      row.lastUpdated = now;
+      row.liveNow = true;
+      keys.forEach(function (k) { if (row.screenerKeys.indexOf(k) === -1) row.screenerKeys.push(k); });
+    } else {                                // brand-new candidate for today → new row
+      registry[id] = {
+        id: id, ticker: s.ticker, date: today, tvSymbol: s.tvSymbol || '',
+        firstSeen: now, lastUpdated: now, liveNow: true,
+        screenerKeys: keys.slice(), stock: s
+      };
+    }
+  });
+}
+
+// Refresh today's rows that did NOT appear in the latest full scan (live
+// earlier, not live now) with fresh quote data, and mark them not-live.
+// Their screener context is preserved — that's why they're candidates.
+function registryRefreshStale(liveTickerSet) {
+  var stale = regTodayRows().filter(function (row) { return !liveTickerSet[row.ticker]; });
+  if (!stale.length) return Promise.resolve(0);
+  var syms = stale.map(function (row) { return row.tvSymbol || (row.stock && row.stock.tvSymbol) || row.ticker; });
+  var now = Date.now();
+  return fetchBySymbols(syms).then(function (fresh) {
+    var byTicker = {};
+    fresh.forEach(function (s) { byTicker[s.ticker] = s; });
+    var refreshed = 0;
+    stale.forEach(function (row) {
+      var s = byTicker[row.ticker];
+      if (s) {
+        s.screenerKey = row.stock ? row.stock.screenerKey : null; // keep why-it's-a-candidate
+        row.stock = s;
+        row.tvSymbol = s.tvSymbol || row.tvSymbol;
+        row.lastUpdated = now;
+        refreshed++;
+      }
+      row.liveNow = false;
+    });
+    return refreshed;
+  }).catch(function () {
+    stale.forEach(function (row) { row.liveNow = false; }); // honest UI even if refresh fails
+    return 0;
+  });
+}
+
+// Render the Screener result cards from today's registry rows (the only path
+// that fills #scrResults). Live candidates first, then by screeners matched,
+// then RVOL, then most-recently updated.
+function renderScreenerFromRegistry() {
+  var rows = regTodayRows();
+  rows.sort(function (a, b) {
+    if (a.liveNow !== b.liveNow) return a.liveNow ? -1 : 1;
+    if (b.screenerKeys.length !== a.screenerKeys.length) return b.screenerKeys.length - a.screenerKeys.length;
+    var ra = (a.stock && a.stock.rvol) || 0, rb = (b.stock && b.stock.rvol) || 0;
+    if (rb !== ra) return rb - ra;
+    return (b.lastUpdated || 0) - (a.lastUpdated || 0);
+  });
+  var host = $('scrResults');
+  if (!rows.length) { host.innerHTML = '<div class="empty">No candidates yet today. Run a scan above.</div>'; return 0; }
+  host.innerHTML = rows.map(function (row) {
+    return buildCard(row.stock, row.screenerKeys, { liveNow: row.liveNow, firstSeen: row.firstSeen, lastUpdated: row.lastUpdated });
+  }).join('');
+  return rows.length;
+}
+
 async function runAllScreeners() {
   var scrBtns = $('scrButtons').querySelectorAll('[data-scr]');
   $('scrRunAll').disabled = true;
   Array.prototype.forEach.call(scrBtns, function (b) { b.disabled = true; });
   $('scrStatus').textContent = 'Running 3 screeners…';
-  $('scrResults').innerHTML = '';
   try {
     if (!marketCtx.lastRefresh) await refreshMarket();
     var keys = ['trend', 'premarket', 'bigmoves'];
@@ -1145,15 +1275,18 @@ async function runAllScreeners() {
         if (byTicker[s.ticker].keys.indexOf(k) === -1) byTicker[s.ticker].keys.push(k);
       });
     });
-    var merged = Object.keys(byTicker).map(function (t) { return byTicker[t]; });
-    // sort: most screeners matched first, then by RVOL
-    merged.sort(function (a, b) {
-      if (b.keys.length !== a.keys.length) return b.keys.length - a.keys.length;
-      return (b.stock.rvol || 0) - (a.stock.rvol || 0);
+    var liveStocks = [], keysByTicker = {}, liveSet = {};
+    Object.keys(byTicker).forEach(function (t) {
+      liveStocks.push(byTicker[t].stock); keysByTicker[t] = byTicker[t].keys; liveSet[t] = true;
     });
-    if (!merged.length) { $('scrResults').innerHTML = '<div class="empty">No matches right now. Markets may be closed or filters too tight.</div>'; }
-    else { $('scrResults').innerHTML = merged.map(function (m) { return buildCard(m.stock, m.keys); }).join(''); }
-    $('scrStatus').textContent = merged.length + ' unique tickers across ' + keys.length + ' screeners.';
+    // registry-first: record live now → refresh earlier-today candidates → render from registry
+    registryUpsertLive(liveStocks, keysByTicker);
+    var refreshed = await registryRefreshStale(liveSet);
+    await saveRegistry();
+    var shown = renderScreenerFromRegistry();
+    renderRegistryTable();
+    $('scrStatus').textContent = shown + ' candidate' + (shown === 1 ? '' : 's') + ' today · ' +
+      liveStocks.length + ' live now' + (refreshed ? ' · ' + refreshed + ' earlier refreshed' : '');
   } catch (e) {
     $('scrStatus').textContent = 'Error: ' + e.message;
   }
@@ -1166,16 +1299,123 @@ async function runSingle(key) {
   $('scrRunAll').disabled = true;
   Array.prototype.forEach.call(scrBtns, function (b) { b.disabled = true; });
   $('scrStatus').textContent = 'Running ' + SCREENERS[key].name + '…';
-  $('scrResults').innerHTML = '';
   try {
     if (!marketCtx.lastRefresh) await refreshMarket();
     var list = await runScreener(key);
-    if (!list.length) $('scrResults').innerHTML = '<div class="empty">No matches right now.</div>';
-    else $('scrResults').innerHTML = list.map(function (s) { return buildCard(s, [key]); }).join('');
-    $('scrStatus').textContent = list.length + ' results · ' + SCREENERS[key].name;
+    // A single screener is a partial scan: add/update what it found (and mark
+    // those live) but don't reconcile or refresh the other screeners' rows.
+    var keysByTicker = {};
+    list.forEach(function (s) { keysByTicker[s.ticker] = [key]; });
+    registryUpsertLive(list, keysByTicker);
+    await saveRegistry();
+    var shown = renderScreenerFromRegistry();
+    renderRegistryTable();
+    $('scrStatus').textContent = list.length + ' live from ' + SCREENERS[key].name +
+      ' · ' + shown + ' candidate' + (shown === 1 ? '' : 's') + ' today';
   } catch (e) { $('scrStatus').textContent = 'Error: ' + e.message; }
   $('scrRunAll').disabled = false;
   Array.prototype.forEach.call(scrBtns, function (b) { b.disabled = false; });
+}
+
+// ── REGISTRY TAB: table view + CSV export ───────────────────────────────
+function regFix(v, d) { return (v == null || !isFinite(v)) ? '' : Number(v).toFixed(d == null ? 2 : d); }
+var REG_COLUMNS = [
+  { label: 'Date', get: function (r) { return r.date; } },
+  { label: 'Ticker', get: function (r) { return r.ticker; } },
+  { label: 'Status', get: function (r) { return r.liveNow ? 'live' : 'earlier'; } },
+  { label: 'First seen', get: function (r) { return fmtETTime(r.firstSeen); } },
+  { label: 'Updated', get: function (r) { return fmtETTime(r.lastUpdated); } },
+  { label: 'Screeners', get: function (r) { return (r.screenerKeys || []).map(function (k) { return SCREENERS[k] ? SCREENERS[k].short : k; }).join(' / '); } },
+  { label: 'Price', get: function (r) { return regFix(r.stock.price); } },
+  { label: 'Open', get: function (r) { return regFix(r.stock.open); } },
+  { label: 'Prev close', get: function (r) { return regFix(r.stock.prevClose); } },
+  { label: 'Change %', get: function (r) { return regFix(r.stock.change); } },
+  { label: 'Gap %', get: function (r) { return regFix(r.stock.gapPct); } },
+  { label: 'VWAP', get: function (r) { return regFix(r.stock.vwap); } },
+  { label: 'RVOL', get: function (r) { return regFix(r.stock.rvol); } },
+  { label: 'ATR', get: function (r) { return regFix(r.stock.atr); } },
+  { label: 'Day H', get: function (r) { return regFix(r.stock.dayHigh); } },
+  { label: 'Day L', get: function (r) { return regFix(r.stock.dayLow); } },
+  { label: '1M H', get: function (r) { return regFix(r.stock.monthHigh); } },
+  { label: '1M L', get: function (r) { return regFix(r.stock.monthLow); } },
+  { label: 'Mkt cap', get: function (r) { return regFix(r.stock.mcap, 0); } },
+  { label: 'Float', get: function (r) { return regFix(r.stock.floatShares, 0); } },
+  { label: 'Short %', get: function (r) { return regFix(r.stock.shortFloat); } },
+  { label: 'EMA9', get: function (r) { return regFix(r.stock.ema9); } },
+  { label: 'EMA13', get: function (r) { return regFix(r.stock.ema13); } },
+  { label: 'EMA20', get: function (r) { return regFix(r.stock.ema20); } },
+  { label: 'EMA50', get: function (r) { return regFix(r.stock.ema50); } },
+  { label: 'SMA5', get: function (r) { return regFix(r.stock.sma5); } },
+  { label: 'Sector', get: function (r) { return r.stock.sector || ''; } },
+  { label: 'Industry', get: function (r) { return r.stock.industry || ''; } }
+];
+function regSortForTable(a, b) {
+  if (a.date !== b.date) return a.date < b.date ? 1 : -1;          // newest day first
+  if (a.liveNow !== b.liveNow) return a.liveNow ? -1 : 1;          // live before earlier
+  return a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0;
+}
+function setRegStatus(msg) {
+  var el = $('regStatus'); if (!el) return;
+  el.textContent = msg || '';
+  if (msg) setTimeout(function () { if (el.textContent === msg) el.textContent = ''; }, 4000);
+}
+function renderRegistryTable() {
+  var host = $('regTableWrap'); if (!host) return;
+  var all = Object.keys(registry).map(function (k) { return registry[k]; });
+  var today = etDateStr();
+  var todayCount = all.filter(function (r) { return r.date === today; }).length;
+  var liveCount = all.filter(function (r) { return r.date === today && r.liveNow; }).length;
+  var sum = $('regSummary');
+  if (sum) sum.textContent = all.length + ' record' + (all.length === 1 ? '' : 's') + ' · ' + todayCount + ' today · ' + liveCount + ' live now';
+  if (!all.length) { host.innerHTML = '<div class="empty">No records yet. Run a scan from the 🔎 Screener tab.</div>'; return; }
+  all.sort(regSortForTable);
+  var head = '<tr>' + REG_COLUMNS.map(function (c) { return '<th>' + esc(c.label) + '</th>'; }).join('') + '</tr>';
+  var body = all.map(function (row) {
+    var cls = row.date !== today ? 'reg-old' : row.liveNow ? 'reg-live' : 'reg-today';
+    return '<tr class="' + cls + '">' + REG_COLUMNS.map(function (c) {
+      return '<td>' + esc(c.get(row)) + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  host.innerHTML = '<table class="reg-table"><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+}
+function csvCell(v) {
+  var s = String(v == null ? '' : v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function exportRegistryCsv() {
+  var all = Object.keys(registry).map(function (k) { return registry[k]; });
+  if (!all.length) { setRegStatus('Registry is empty — nothing to export.'); return; }
+  all.sort(regSortForTable);
+  var lines = [REG_COLUMNS.map(function (c) { return csvCell(c.label); }).join(',')];
+  all.forEach(function (row) {
+    lines.push(REG_COLUMNS.map(function (c) { return csvCell(c.get(row)); }).join(','));
+  });
+  var csv = lines.join('\r\n');
+  var fname = 'candidate-registry-' + etDateStr() + '.csv';
+  var ok = false;
+  try {
+    var blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = fname; document.body.appendChild(a); a.click();
+    setTimeout(function () { try { document.body.removeChild(a); } catch (_) {} URL.revokeObjectURL(url); }, 1000);
+    ok = true;
+  } catch (_) { ok = downloadText(fname, csv); }
+  setRegStatus(ok ? ('Exported ' + all.length + ' record' + (all.length === 1 ? '' : 's') + ' → ' + fname) : 'Export failed.');
+}
+function initRegistry() {
+  var ex = $('regExport'); if (ex) ex.addEventListener('click', exportRegistryCsv);
+  var rf = $('regRefresh'); if (rf) rf.addEventListener('click', renderRegistryTable);
+  var cl = $('regClear');
+  if (cl) cl.addEventListener('click', function () {
+    if (!window.confirm('Clear the entire candidate registry? This removes every saved record for all days.')) return;
+    registry = {};
+    saveRegistry().then(function () {
+      renderRegistryTable();
+      renderScreenerFromRegistry();
+      setRegStatus('Registry cleared.');
+    });
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1525,7 +1765,9 @@ function initTabs() {
       document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
       document.querySelectorAll('.pane').forEach(function (x) { x.classList.remove('active'); });
       t.classList.add('active');
-      $(t.getAttribute('data-pane')).classList.add('active');
+      var pane = t.getAttribute('data-pane');
+      $(pane).classList.add('active');
+      if (pane === 'pane-registry') renderRegistryTable(); // always show the latest records
     });
   });
 }
@@ -1606,6 +1848,7 @@ document.addEventListener('DOMContentLoaded', function () {
   initNews();
   initShortlist();
   initShortlistStars();
+  initRegistry();
   $('mktRefresh').addEventListener('click', refreshMarket);
   $('scrRunAll').addEventListener('click', runAllScreeners);
   // load settings first (thresholds + key), then auto-load market
@@ -1613,7 +1856,13 @@ document.addEventListener('DOMContentLoaded', function () {
     initSettings();
     refreshMarket();
   });
-  loadShortlists().then(renderShortlist);
+  // restore the registry + shortlists, then paint today's candidate cards
+  // (after shortlists so the ☆/★ state is correct) and the registry table.
+  Promise.all([loadRegistry(), loadShortlists()]).then(function () {
+    renderShortlist();
+    renderScreenerFromRegistry();
+    renderRegistryTable();
+  });
 });
 
 /* ══════════════════════════════════════════════════════════════════════
