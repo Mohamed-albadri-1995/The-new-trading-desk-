@@ -1208,8 +1208,14 @@ function buildCard(row) {
 //     id, ticker, date, tvSymbol,
 //     firstSeen, lastUpdated, liveNow,   // liveNow = matched the latest full scan
 //     screenerKeys: [..],                // screeners it has matched today (union)
-//     stock: { ...full mapped quote... } // what buildCard / the table consume
+//     stock:   { ...full mapped quote... },   // technicals the card/table consume
+//     context: { themes, broad, broadResolved, secBias, secScore, secHot,
+//                marketBias },                 // Market-tab snapshot, frozen at scan time
+//     news:    { finnhub:[], tradingview:[], fetchedAt } | null  // fetched on demand
 //   }
+// Cards are a pure view of the row — buildCard reads stock/context/news only,
+// never the live marketCtx — so a record stays consistent with the scan that
+// produced it.
 // ══════════════════════════════════════════════════════════════════════
 var registry = {};   // id -> row
 
