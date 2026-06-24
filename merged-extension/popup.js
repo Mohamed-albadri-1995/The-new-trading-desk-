@@ -1479,35 +1479,36 @@ var SNAP_COLUMNS = [
   { n: 44, label: 'Mkt Cap',        k: 'mcap', fmt: 0 },
   { n: 45, label: 'Float',          k: 'floatShares', fmt: 0 },
   { n: 46, label: 'Short Float %',  k: 'shortFloat', fmt: 1 },
+  { n: 47, label: 'Short Ratio',    k: 'shortRatio', fmt: 1 },
   // ── Registry meta ────────────────────────────────────────────
-  { n: 47, label: 'News count',     k: 'newsCount', fmt: 0 },
-  { n: 48, label: 'Screeners',      k: 'screenerKeys' },
-  { n: 49, label: 'First seen ET',  k: 'firstSeen' },
-  { n: 50, label: 'Last upd ET',    k: 'lastUpdated' },
+  { n: 48, label: 'News count',     k: 'newsCount', fmt: 0 },
+  { n: 49, label: 'Screeners',      k: 'screenerKeys' },
+  { n: 50, label: 'First seen ET',  k: 'firstSeen' },
+  { n: 51, label: 'Last upd ET',    k: 'lastUpdated' },
   // ── Part 2: Market Underlyings (per-day, duplicated per ticker) ──
-  { n: 51, label: 'SPY Price',      k: 'spyPrice', fmt: 2 },
-  { n: 52, label: 'SPY Day %',      k: 'spyDay', fmt: 2 },
-  { n: 53, label: 'SPY Week %',     k: 'spyWeek', fmt: 2 },
-  { n: 54, label: 'QQQ Price',      k: 'qqqPrice', fmt: 2 },
-  { n: 55, label: 'QQQ Day %',      k: 'qqqDay', fmt: 2 },
-  { n: 56, label: 'QQQ Week %',     k: 'qqqWeek', fmt: 2 },
-  { n: 57, label: 'IWM Price',      k: 'iwmPrice', fmt: 2 },
-  { n: 58, label: 'IWM Day %',      k: 'iwmDay', fmt: 2 },
-  { n: 59, label: 'VIX Level',      k: 'vixLevel', fmt: 2 },
-  { n: 60, label: 'VIX Change %',   k: 'vixChange', fmt: 2 },
-  { n: 61, label: 'SPY vs 200DMA%', k: 'spyVs200', fmt: 2 },
-  { n: 62, label: 'Cross Signal',   k: 'crossSignal' },
-  { n: 63, label: 'ST Score',       k: 'stScore', fmt: 0 },
-  { n: 64, label: 'MT Stage Label', k: 'mtStageLabel' },
+  { n: 52, label: 'SPY Price',      k: 'spyPrice', fmt: 2 },
+  { n: 53, label: 'SPY Day %',      k: 'spyDay', fmt: 2 },
+  { n: 54, label: 'SPY Week %',     k: 'spyWeek', fmt: 2 },
+  { n: 55, label: 'QQQ Price',      k: 'qqqPrice', fmt: 2 },
+  { n: 56, label: 'QQQ Day %',      k: 'qqqDay', fmt: 2 },
+  { n: 57, label: 'QQQ Week %',     k: 'qqqWeek', fmt: 2 },
+  { n: 58, label: 'IWM Price',      k: 'iwmPrice', fmt: 2 },
+  { n: 59, label: 'IWM Day %',      k: 'iwmDay', fmt: 2 },
+  { n: 60, label: 'VIX Level',      k: 'vixLevel', fmt: 2 },
+  { n: 61, label: 'VIX Change %',   k: 'vixChange', fmt: 2 },
+  { n: 62, label: 'SPY vs 200DMA%', k: 'spyVs200', fmt: 2 },
+  { n: 63, label: 'Cross Signal',   k: 'crossSignal' },
+  { n: 64, label: 'ST Score',       k: 'stScore', fmt: 0 },
+  { n: 65, label: 'MT Stage Label', k: 'mtStageLabel' },
   // ── Part 3: Output Calculations ──────────────────────────────
-  // Field 65 = Entry (price at snapshot time, same as field 16)
-  // Fields 69/70 formulas use field 65 as entry and field 28 (ATR) as divisor
-  { n: 65, label: 'Entry',          k: 'entry', fmt: 2 },
-  { n: 66, label: 'High since entry',k: 'highSinceEntry', fmt: 2 },
-  { n: 67, label: 'Low since entry', k: 'lowSinceEntry', fmt: 2 },
-  { n: 68, label: 'Entry Time ET',  k: 'entryTime' },
-  { n: 69, label: 'Long score',     k: 'longScore', fmt: 2 },
-  { n: 70, label: 'Short score',    k: 'shortScore', fmt: 2 }
+  // Field 66 = Entry (price at snapshot time, same as field 16)
+  // Fields 70/71 formulas use field 66 as entry and field 28 (ATR) as divisor
+  { n: 66, label: 'Entry',          k: 'entry', fmt: 2 },
+  { n: 67, label: 'High since entry',k: 'highSinceEntry', fmt: 2 },
+  { n: 68, label: 'Low since entry', k: 'lowSinceEntry', fmt: 2 },
+  { n: 69, label: 'Entry Time ET',  k: 'entryTime' },
+  { n: 70, label: 'Long score',     k: 'longScore', fmt: 2 },
+  { n: 71, label: 'Short score',    k: 'shortScore', fmt: 2 }
 ];
 
 function snapGetVal(row, col) {
@@ -1660,7 +1661,7 @@ async function buildSnapshotRegistry(snapshotTime) {
         // monthly range
         monthHigh: mh, monthLow: ml, mPos: mPos, mFromH: mFromH, mFromL: mFromL,
         // fundamentals
-        mcap: s.mcap, floatShares: s.floatShares, shortFloat: s.shortFloat,
+        mcap: s.mcap, floatShares: s.floatShares, shortFloat: s.shortFloat, shortRatio: s.shortRatio,
         // meta
         newsCount: newsCount,
         screenerKeys: (regRow.screenerKeys || []).map(function (k) { return SCREENERS[k] ? SCREENERS[k].short : k; }).join(', '),
