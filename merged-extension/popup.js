@@ -995,9 +995,9 @@ function loadCardNews(ticker, tvSymbol, hostId) {
     .catch(function (e) { host.innerHTML = '<span class="sub9">News unavailable: ' + esc(e.message) + '</span>'; });
 }
 
-// Inner markup for a card's news host — either the stored (registry) news with
-// a refresh control, or the initial "load" button. Shared by buildCard and
-// loadCardNews so a freshly-fetched card matches a re-rendered one.
+// Inner markup for a card's news host — the stored (registry) news with a
+// refresh control, or a "pending" notice when the row has no news yet (which
+// shouldn't happen after a scan since autoFetchNewsForRegistry runs first).
 function newsHostInner(ticker, tvSymbol, newsId, news) {
   var btn = function (label) {
     return '<button class="btn-mini" data-news="' + esc(ticker) + '" data-tvsym="' + esc(tvSymbol || '') +
@@ -1007,7 +1007,25 @@ function newsHostInner(ticker, tvSymbol, newsId, news) {
     return renderNewsItems(news) +
       '<div class="sub9" style="margin-top:4px">Fetched ' + esc(fmtETTime(news.fetchedAt)) + ' ET · ' + btn('↻ refresh') + '</div>';
   }
-  return btn('📰 Load recent news');
+  return '<span class="sub9">News not yet loaded · </span>' + btn('📰 Load news');
+}
+
+// Fetch news in parallel for every today-row that has no news yet.
+// Called after every scan so cards render with real news, not a button.
+async function autoFetchNewsForRegistry(rows) {
+  var needFetch = rows.filter(function (row) { return !row.news; });
+  if (!needFetch.length) return;
+  await Promise.allSettled(needFetch.map(function (row) {
+    return fetchNews(row.ticker, row.tvSymbol)
+      .then(function (resp) {
+        row.news = { finnhub: resp.finnhub || [], tradingview: resp.tradingview || [], fetchedAt: Date.now() };
+      })
+      .catch(function () {
+        // Store empty result so the card shows "no news" not a pending button
+        row.news = { finnhub: [], tradingview: [], fetchedAt: Date.now() };
+      });
+  }));
+  await saveRegistry();
 }
 
 // Snapshot the Market-tab-derived context for a stock at scan time, so the
@@ -1330,10 +1348,12 @@ async function runAllScreeners() {
     Object.keys(byTicker).forEach(function (t) {
       liveStocks.push(byTicker[t].stock); keysByTicker[t] = byTicker[t].keys; liveSet[t] = true;
     });
-    // registry-first: record live now → refresh earlier-today candidates → render from registry
+    // registry-first: record live now → refresh earlier-today candidates → fetch news → render
     registryUpsertLive(liveStocks, keysByTicker);
     var refreshed = await registryRefreshStale(liveSet);
     await saveRegistry();
+    $('scrStatus').textContent = 'Fetching news…';
+    await autoFetchNewsForRegistry(regTodayRows());
     var shown = renderScreenerFromRegistry();
     renderRegistryTable();
     $('scrStatus').textContent = shown + ' candidate' + (shown === 1 ? '' : 's') + ' today · ' +
@@ -1359,6 +1379,8 @@ async function runSingle(key) {
     list.forEach(function (s) { keysByTicker[s.ticker] = [key]; });
     registryUpsertLive(list, keysByTicker);
     await saveRegistry();
+    $('scrStatus').textContent = 'Fetching news…';
+    await autoFetchNewsForRegistry(regTodayRows());
     var shown = renderScreenerFromRegistry();
     renderRegistryTable();
     $('scrStatus').textContent = list.length + ' live from ' + SCREENERS[key].name +
