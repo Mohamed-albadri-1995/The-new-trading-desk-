@@ -1000,59 +1000,54 @@ function fetchBySymbols(tvSymbols) {
   });
 }
 
-// Fetch short interest data from Yahoo Finance for a list of tickers.
+// Fetch short interest data from NASDAQ's public JSON API (no auth, no HTML parsing).
 // Returns map: { TICKER: { shortFloat (%), shortRatio (days to cover) } }
-// Requests run in parallel; per-ticker errors are silently ignored.
-// Fetch short float % and days-to-cover from Finviz quote pages.
-// Runs requests in parallel; per-ticker failures are silently skipped.
+// Requests run in parallel; per-ticker failures are silently skipped.
 function fetchYahooShort(tickers) {
   if (!tickers || !tickers.length) return Promise.resolve({});
   var results = {};
   return Promise.all(tickers.map(function (ticker) {
-    var url = 'https://finviz.com/quote.ashx?t=' + encodeURIComponent(ticker);
+    var url = 'https://api.nasdaq.com/api/quote/' + encodeURIComponent(ticker.toUpperCase())
+            + '/short-interest?type=SHORT_INTEREST&limit=1&sortColumn=settlementDate&sortOrder=DESC';
     return fetch(url, {
       headers: {
-        'Accept': 'text/html,application/xhtml+xml',
+        'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://finviz.com/'
+        'Referer': 'https://www.nasdaq.com/'
       }
     })
       .then(function (r) {
         console.log('[short] ' + ticker + ' HTTP ' + r.status);
-        return r.ok ? r.text() : null;
+        return r.ok ? r.json() : null;
       })
-      .then(function (html) {
-        if (!html) { console.warn('[short] ' + ticker + ': no HTML (blocked or non-2xx)'); return; }
-        // Log a 300-char snippet so we can confirm real page vs challenge/block
-        console.log('[short] ' + ticker + ' snippet:', html.slice(0, 300));
-        // Finviz HTML: <td class="snapshot-td2-cp"><b>Short Float</b></td>
-        //              <td class="snapshot-td2" align="right"><a href="...">5.23%</a></td>
-        // Handles both cases: with or without <b>/<a> wrappers
-        function stat(label) {
-          var re = new RegExp(label + '(?:<\\/b>)?<\\/td>\\s*<td[^>]*>\\s*(?:<a[^>]*>)?([0-9]+(?:\\.[0-9]+)?%?)');
-          var m = html.match(re);
-          return m ? m[1].trim() : null;
-        }
-        var sfStr = stat('Short Float');
-        var srStr = stat('Short Ratio');
-        console.log('[short] ' + ticker + ' sf=' + sfStr + ' sr=' + srStr);
-        var sf = sfStr ? parseFloat(sfStr) : null;   // "32.52%" → 32.52
-        var sr = srStr ? parseFloat(srStr) : null;
-        if ((sf != null && !isNaN(sf) && sf > 0) || (sr != null && !isNaN(sr) && sr > 0)) {
-          results[ticker] = { shortFloat: sf, shortRatio: sr };
-        }
+      .then(function (json) {
+        if (!json) { console.warn('[short] ' + ticker + ': no JSON'); return; }
+        console.log('[short] ' + ticker + ':', JSON.stringify(json).slice(0, 400));
+        var rows = json.data && json.data.shortInterest && json.data.shortInterest.rows;
+        var row = rows && rows[0];
+        if (!row) { console.warn('[short] ' + ticker + ': empty rows'); return; }
+        // daysToCover → shortRatio; shortInterest stored to calc shortFloat in applyYahooShort
+        var sr = row.daysToCover ? parseFloat(row.daysToCover) : null;
+        // NASDAQ returns shortInterest as formatted string e.g. "92,143,267"
+        var si = row.shortInterest ? parseFloat(row.shortInterest.replace(/,/g, '')) : null;
+        console.log('[short] ' + ticker + ' daysToCover=' + sr + ' shortInterest=' + si);
+        results[ticker] = { shortRatio: (!isNaN(sr) ? sr : null), _si: (!isNaN(si) ? si : null) };
       })
-      .catch(function (e) { console.warn('[short] ' + ticker + ' fetch error:', e && e.message); });
+      .catch(function (e) { console.warn('[short] ' + ticker + ' err:', e && e.message); });
   })).then(function () { return results; });
 }
 
-// Apply a Yahoo short-data map to a list of registry rows.
+// Apply NASDAQ short-data map to registry rows.
+// shortRatio comes directly from NASDAQ; shortFloat is calculated from
+// NASDAQ short-interest count ÷ float shares already stored on the row.
 function applyYahooShort(rows, yShort) {
   rows.forEach(function (row) {
     var sd = yShort[row.ticker];
     if (!sd || !row.stock) return;
-    if (sd.shortFloat != null) row.stock.shortFloat = sd.shortFloat;
     if (sd.shortRatio != null) row.stock.shortRatio = sd.shortRatio;
+    if (sd._si != null && row.stock.floatShares && row.stock.floatShares > 0) {
+      row.stock.shortFloat = parseFloat(((sd._si / row.stock.floatShares) * 100).toFixed(2));
+    }
   });
 }
 
