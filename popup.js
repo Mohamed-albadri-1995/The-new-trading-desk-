@@ -1422,18 +1422,13 @@ function regId(ticker, date) { return ticker + '|' + date; }
 // ══════════════════════════════════════════════════════════════════════
 var snapshotRegistry = {};
 function loadSnapshotRegistry() {
-  return storageGet(['snapshotRegistry', 'historicalIds']).then(function (r) {
+  return storageGet(['snapshotRegistry']).then(function (r) {
     snapshotRegistry = r.snapshotRegistry || {};
-    historicalIds = r.historicalIds || [];
     return snapshotRegistry;
   });
 }
 function saveSnapshotRegistry() { return storageSet({ snapshotRegistry: snapshotRegistry }); }
 function setSnapStatus(msg) { var el = $('snapStatus'); if (el) el.textContent = msg || ''; }
-
-// Historical IDs: just {ticker, date} pairs loaded from an imported CSV
-var historicalIds = [];
-function saveHistoricalIds() { return storageSet({ historicalIds: historicalIds }); }
 
 function snapFix(v, d) { return (v == null || !isFinite(+v)) ? '' : Number(v).toFixed(d == null ? 2 : d); }
 
@@ -1888,143 +1883,6 @@ async function buildSnapshotRegistry(snapshotTime) {
   setSnapStatus(msg);
 }
 
-// Parse CSV and store only ticker+date IDs — no Alpaca calls, no Registry 2 rows yet.
-function importHistoricalIds(csvText) {
-  var lines = csvText.trim().split('\n');
-  var pairs = [];
-  for (var i = 1; i < lines.length; i++) {
-    var parts = lines[i].trim().split(',');
-    if (parts.length >= 2 && parts[0].trim() && parts[1].trim()) {
-      pairs.push({ ticker: parts[0].trim().toUpperCase(), date: parts[1].trim() });
-    }
-  }
-  if (!pairs.length) { setSnapStatus('No valid rows found in CSV.'); return; }
-  historicalIds = pairs;
-  saveHistoricalIds().then(function () {
-    setSnapStatus(pairs.length + ' IDs loaded (' + pairs[0].ticker + ' ' + pairs[0].date
-      + ' … ' + pairs[pairs.length - 1].ticker + ' ' + pairs[pairs.length - 1].date
-      + '). Click 🔨 Build Historical to fetch Alpaca data.');
-  });
-}
-
-// Fetch Alpaca bars for every stored historical ID and build Registry 2 rows.
-async function buildHistoricalSnapshots(snapTime) {
-  if (!settings.alpacaKey || !settings.alpacaSecret) {
-    setSnapStatus('Add your Alpaca API key and secret in ⚙ Settings first.'); return;
-  }
-  if (!historicalIds.length) {
-    setSnapStatus('No historical IDs — click 📥 Import Historical first.'); return;
-  }
-  _idxCache = {};
-  var total = historicalIds.length, built = 0, failed = 0;
-  setSnapStatus('Building historical snapshots for ' + total + ' entries…');
-
-  for (var pi = 0; pi < historicalIds.length; pi++) {
-    var ticker = historicalIds[pi].ticker, date = historicalIds[pi].date;
-    try {
-      // Index data cached per date — only fetched once per unique date
-      var idxSnap = await fetchIdxSnap(date, snapTime).catch(function () {
-        return { spyPrice: null, spyDay: null, spyWeek: null,
-          qqqPrice: null, qqqDay: null, qqqWeek: null,
-          iwmPrice: null, iwmDay: null, vixLevel: null, vixChange: null,
-          spyVs200: null, crossSignal: '', stBull: 0, stBear: 0, stScore: 0, stBias: 'NEUTRAL' };
-      });
-
-      var fetched = await Promise.all([
-        fetchIntradayBars(ticker, date),
-        fetchDailyBars(ticker, date, 220).catch(function () { return []; }),
-        fetchIntradayBars(ticker, date, '04:00:00', '09:29:00').catch(function () { return []; })
-      ]);
-      var bars = fetched[0], dailyBars = fetched[1], pmBars = fetched[2];
-
-      var snapBar = null;
-      for (var bi = 0; bi < bars.length; bi++) {
-        if (bars[bi].etTime === snapTime) { snapBar = bars[bi]; break; }
-      }
-      if (!snapBar) {
-        for (var bi2 = bars.length - 1; bi2 >= 0; bi2--) {
-          if (bars[bi2].etTime <= snapTime) { snapBar = bars[bi2]; break; }
-        }
-      }
-      var entry = snapBar ? snapBar.c : null;
-
-      var volToSnap = 0, vwNumer = 0, vwDenom = 0;
-      for (var bi3 = 0; bi3 < bars.length; bi3++) {
-        var b3 = bars[bi3];
-        if (b3.etTime > snapTime) break;
-        volToSnap += b3.v; vwNumer += (b3.vw || b3.c) * b3.v; vwDenom += b3.v;
-      }
-      var vwapAtSnap = vwDenom > 0 ? vwNumer / vwDenom : null;
-
-      var highSince = null, lowSince = null;
-      for (var bi4 = 0; bi4 < bars.length; bi4++) {
-        var b4 = bars[bi4];
-        if (b4.etTime < snapTime) continue;
-        if (highSince == null || b4.h > highSince) highSince = b4.h;
-        if (lowSince  == null || b4.l < lowSince)  lowSince  = b4.l;
-      }
-
-      var ind = calcIndicatorsFromBars(dailyBars, date, bars, snapTime);
-      var pm  = calcPmData(pmBars, ind.atr);
-
-      var ema9 = ind.ema9, ema13 = ind.ema13, ema20 = ind.ema20, ema50 = ind.ema50;
-      var emaStack = '';
-      if (entry != null && ema9 != null && ema13 != null && ema20 != null && ema50 != null) {
-        if (ema9 > ema13 && ema13 > ema20 && ema20 > ema50) emaStack = 'bull (9>13>20>50)';
-        else if (ema9 < ema13 && ema13 < ema20 && ema20 < ema50) emaStack = 'bear (9<13<20<50)';
-        else emaStack = 'mixed';
-      }
-      var mh = ind.monthHigh, ml = ind.monthLow;
-      var mPos   = (entry != null && mh != null && ml != null && mh > ml) ? (entry - ml) / (mh - ml) * 100 : null;
-      var mFromH = (entry != null && mh != null && mh > 0) ? (mh - entry) / mh * 100 : null;
-      var mFromL = (entry != null && ml != null && ml > 0) ? (entry - ml) / ml * 100 : null;
-      var changePct  = snapPct(entry, ind.prevClose);
-      var longScore  = (entry != null && highSince != null && ind.atr && ind.atr > 0) ? (highSince - entry) / ind.atr : null;
-      var shortScore = (entry != null && lowSince  != null && ind.atr && ind.atr > 0) ? (entry - lowSince)  / ind.atr : null;
-
-      snapshotRegistry[regId(ticker, date)] = {
-        date: date, ticker: ticker, tvSymbol: ticker,
-        sector: '', industry: '', themes: '', hotSector: '', sectorBias: '', sectorScore: null,
-        stBias: idxSnap.stBias, stBull: idxSnap.stBull, stBear: idxSnap.stBear,
-        mtBias: '', mtScore: null, ltBias: '',
-        priceAtSnap: entry,
-        open: ind.open, prevClose: ind.prevClose, gapPct: ind.gapPct, changePct: changePct,
-        volumeAtSnap: volToSnap || null, rvol: ind.rvol, vwapAtSnap: vwapAtSnap,
-        pmHigh: pm.pmHigh, pmLow: pm.pmLow, pmRange: pm.pmRange, pmAdr: pm.pmAdr,
-        atr: ind.atr,
-        ema9: ema9, ema13: ema13, ema20: ema20, ema50: ema50, sma5: ind.sma5,
-        vsEma9: snapPct(entry, ema9), vsEma20: snapPct(entry, ema20),
-        vsEma50: snapPct(entry, ema50), vsSma5: snapPct(entry, ind.sma5),
-        emaStack: emaStack,
-        monthHigh: mh, monthLow: ml, mPos: mPos, mFromH: mFromH, mFromL: mFromL,
-        mcap: null, floatShares: null, shortFloat: null, shortRatio: null,
-        newsCount: null, screenerKeys: '', firstSeen: '', lastUpdated: '',
-        spyPrice: idxSnap.spyPrice, spyDay: idxSnap.spyDay, spyWeek: idxSnap.spyWeek,
-        qqqPrice: idxSnap.qqqPrice, qqqDay: idxSnap.qqqDay, qqqWeek: idxSnap.qqqWeek,
-        iwmPrice: idxSnap.iwmPrice, iwmDay: idxSnap.iwmDay,
-        vixLevel: idxSnap.vixLevel, vixChange: idxSnap.vixChange,
-        spyVs200: idxSnap.spyVs200, crossSignal: idxSnap.crossSignal,
-        stScore: idxSnap.stScore, mtStageLabel: '',
-        entry: entry, highSinceEntry: highSince, lowSinceEntry: lowSince,
-        entryTime: snapTime, longScore: longScore, shortScore: shortScore
-      };
-      built++;
-    } catch (e) {
-      console.warn('[HistBuild]', ticker, date, e.message);
-      failed++;
-    }
-    if ((built + failed) % 5 === 0 || (built + failed) === total) {
-      setSnapStatus('Building… ' + (built + failed) + ' / ' + total);
-    }
-  }
-
-  await saveSnapshotRegistry();
-  renderSnapshotTable();
-  var msg = 'Built ' + built + ' historical snapshot' + (built === 1 ? '' : 's') + '.';
-  if (failed) msg += ' ' + failed + ' failed — see DevTools console.';
-  setSnapStatus(msg);
-}
-
 function renderSnapshotTable() {
   var host = $('snapTableWrap');
   if (!host) return;
@@ -2418,23 +2276,6 @@ function initRegistry() {
     buildSnapshotRegistry(t);
   });
   var se = $('snapExport'); if (se) se.addEventListener('click', exportSnapshotCsv);
-  var si = $('snapImport'), sif = $('snapImportFile');
-  if (si && sif) {
-    si.addEventListener('click', function () { sif.click(); });
-    sif.addEventListener('change', function () {
-      var file = sif.files && sif.files[0];
-      if (!file) return;
-      sif.value = '';
-      var reader = new FileReader();
-      reader.onload = function (e) { importHistoricalIds(e.target.result); };
-      reader.readAsText(file);
-    });
-  }
-  var sbh = $('snapBuildHistorical');
-  if (sbh) sbh.addEventListener('click', function () {
-    var t = ($('snapTime') && $('snapTime').value) || '09:40';
-    buildHistoricalSnapshots(t);
-  });
   var sc = $('snapClear');
   if (sc) sc.addEventListener('click', function () {
     if (!window.confirm('Clear the entire snapshot registry?')) return;
