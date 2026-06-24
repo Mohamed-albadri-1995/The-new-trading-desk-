@@ -442,6 +442,9 @@
     <div class="set-help">Every scan writes its results here first, then the Screener cards are built from this registry — so candidates that were live earlier in the day aren't lost when a later scan no longer returns them. Each <b>ticker + day</b> is one record: a stock that reappears the same day updates its row, the same ticker on a new day starts a fresh row, and past days are kept untouched for the record.</div>
     <div class="reg-toolbar">
       <button class="btn btn-primary" id="regExport">⬇ Export CSV</button>
+      <button class="btn btn-primary" id="regBackup">💾 Export Backup</button>
+      <button class="btn btn-ghost" id="regImport">⬆ Import Backup</button>
+      <input type="file" id="regImportFile" accept=".json" style="display:none">
       <button class="btn btn-ghost" id="regRefresh">🔄 Refresh table</button>
       <button class="btn btn-ghost" id="regClear">🗑 Clear registry</button>
     </div>
